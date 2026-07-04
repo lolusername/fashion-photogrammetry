@@ -58,8 +58,8 @@ styles in `src/style.css`.
 - The theme rail contains no dress controls or instructions.
 - Every theme uses the same previous/next dress arrows.
 - Dialectic keeps its orange archive panel beside the blue 3D pane.
-- Invisible Cities keeps the historical chromatic field, floating forms, and
-  feathered canvas bleed.
+- Invisible Cities keeps the historical chromatic field, floating forms,
+  feathered canvas bleed, portal frame, and internal dress gallery.
 - Wind Archive prints spawn only away from the dress, scale down on narrow
   viewports, and become invisible whenever their projected bounds would cover
   the garment.

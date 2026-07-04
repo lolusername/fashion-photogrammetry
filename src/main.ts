@@ -1283,13 +1283,15 @@ function animate(timestamp?: number) {
   const invisibleCitiesActive = cycloramaBackgroundSettings.preset === 'mew-holo';
   const ivoryThemeActive = cycloramaBackgroundSettings.preset === 'ivory-holo';
   const signalThemeActive = cycloramaBackgroundSettings.preset === 'signal-black';
-  const objectPostThemeActive = ivoryThemeActive;
-  const objectBlurAmount = ivoryThemeActive
+  const objectPostThemeActive = invisibleCitiesActive || ivoryThemeActive;
+  const objectBlurAmount = invisibleCitiesActive
+    ? themeObjectPostSettings.mewBlur
+    : ivoryThemeActive
     ? themeObjectPostSettings.ivoryBlur
     : 0;
 
   bloomPass.threshold = invisibleCitiesActive
-    ? 0.84
+    ? 0.88
     : ivoryThemeActive
     ? 0.82
     : blueThemeActive || signalThemeActive
@@ -1309,7 +1311,7 @@ function animate(timestamp?: number) {
     : ivoryThemeActive
     ? 0.06
     : invisibleCitiesActive
-    ? 0.22 + pointerWind.activity * 0.035
+    ? 0.08 + pointerWind.activity * 0.025
     : signalThemeActive
     ? 0.05
     : BLOOM_BASE_RADIUS + pointerWind.activity * BLOOM_WIND_RADIUS;
@@ -1343,7 +1345,10 @@ function animate(timestamp?: number) {
         object.visible = true;
       });
     }
-    renderSharpSubjectOverlay(delta, { hideGhosts: ivoryThemeActive });
+    renderSharpSubjectOverlay(delta, {
+      direct: invisibleCitiesActive,
+      hideGhosts: ivoryThemeActive,
+    });
   } else {
     composer.render(delta);
   }
@@ -1383,7 +1388,10 @@ function getVisibleFullDressObjects() {
   return objects;
 }
 
-function renderSharpSubjectOverlay(delta: number, options: { hideGhosts?: boolean } = {}) {
+function renderSharpSubjectOverlay(
+  delta: number,
+  options: { direct?: boolean; hideGhosts?: boolean } = {},
+) {
   const hiddenObjects: THREE.Object3D[] = [];
   [cycloramaMesh, infiniteBackdropMesh, holoAccentGroup, ivorySculptureGroup, photoPrintGroup, yellowBacking, paperRollMesh].forEach((object) => {
     if (object) {
@@ -1403,11 +1411,20 @@ function renderSharpSubjectOverlay(delta: number, options: { hideGhosts?: boolea
 
   scene.background = null;
   try {
-    sharpSubjectRenderPass.clearAlpha = 0;
-    sharpSubjectComposer.render(delta);
-    renderer.setRenderTarget(null);
-    renderer.autoClear = false;
-    renderer.render(sharpSubjectOverlayScene, sharpSubjectOverlayCamera);
+    if (options.direct) {
+      // The OG Invisible Cities composition feathers only the chromatic field.
+      // The dress and ghost scans are rendered back over it without the
+      // feather pass, preserving the original cut-paper editorial hierarchy.
+      renderer.autoClear = false;
+      renderer.clearDepth();
+      renderer.render(scene, camera);
+    } else {
+      sharpSubjectRenderPass.clearAlpha = 0;
+      sharpSubjectComposer.render(delta);
+      renderer.setRenderTarget(null);
+      renderer.autoClear = false;
+      renderer.render(sharpSubjectOverlayScene, sharpSubjectOverlayCamera);
+    }
   } finally {
     renderer.autoClear = previousAutoClear;
     scene.background = previousBackground;
@@ -4699,8 +4716,9 @@ function buildIvoryPortal() {
     return;
   }
 
-  const w = Math.max(360, Math.round(window.innerWidth));
-  const h = Math.max(360, Math.round(window.innerHeight));
+  const canvasBounds = canvasElement.getBoundingClientRect();
+  const w = Math.max(294, Math.round(canvasBounds.width || window.innerWidth));
+  const h = Math.max(360, Math.round(canvasBounds.height || window.innerHeight));
   const mobilePortal = w < 560;
 
   // Mobile keeps the side columns thin so the dome banner doesn't waste width;
