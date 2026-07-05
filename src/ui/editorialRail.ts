@@ -7,6 +7,7 @@ export type EditorialRail = {
   themeButtons: HTMLButtonElement[];
   setTheme: (themeId: PublicThemeId) => void;
   setReady: (ready: boolean) => void;
+  setCollapsed: (collapsed: boolean) => void;
 };
 
 type EditorialRailOptions = {
@@ -20,11 +21,23 @@ export function createEditorialRail(options: EditorialRailOptions): EditorialRai
   const rail = document.createElement('aside');
   rail.className = 'editorial-rail';
   rail.dataset.ready = 'false';
+  rail.dataset.collapsed = 'false';
   rail.setAttribute('aria-label', 'Experience navigation');
   rail.innerHTML = `
     <header class="editorial-rail__header">
-      <span class="editorial-rail__monogram" aria-hidden="true">FS</span>
-      <span>Three studies</span>
+      <span class="editorial-rail__identity">
+        <span class="editorial-rail__monogram" aria-hidden="true">FS</span>
+        <span class="editorial-rail__title">Three studies</span>
+      </span>
+      <button
+        class="editorial-rail__toggle"
+        type="button"
+        aria-label="Collapse theme navigation"
+        aria-expanded="true"
+        title="Collapse theme navigation"
+      >
+        <span aria-hidden="true">→</span>
+      </button>
     </header>
     <nav class="editorial-rail__themes" aria-label="Choose a theme">
       ${themes.map((theme) => `
@@ -47,6 +60,7 @@ export function createEditorialRail(options: EditorialRailOptions): EditorialRai
   mount.append(rail);
 
   const themeButtons = Array.from(rail.querySelectorAll<HTMLButtonElement>('[data-background-preset]'));
+  const collapseToggle = rail.querySelector<HTMLButtonElement>('.editorial-rail__toggle');
 
   const setTheme = (themeId: PublicThemeId) => {
     const theme = themes.find((candidate) => candidate.id === themeId);
@@ -67,7 +81,26 @@ export function createEditorialRail(options: EditorialRailOptions): EditorialRai
     rail.setAttribute('aria-hidden', String(!ready));
   };
 
+  const setCollapsed = (collapsed: boolean) => {
+    rail.dataset.collapsed = String(collapsed);
+    document.documentElement.dataset.editorialRail = collapsed ? 'collapsed' : 'expanded';
+    collapseToggle?.setAttribute('aria-expanded', String(!collapsed));
+    collapseToggle?.setAttribute(
+      'aria-label',
+      collapsed ? 'Expand theme navigation' : 'Collapse theme navigation',
+    );
+    collapseToggle?.setAttribute(
+      'title',
+      collapsed ? 'Expand theme navigation' : 'Collapse theme navigation',
+    );
+  };
+
+  collapseToggle?.addEventListener('click', () => {
+    setCollapsed(rail.dataset.collapsed !== 'true');
+  });
+
   setTheme(options.activeThemeId);
+  setCollapsed(false);
   setReady(false);
 
   return {
@@ -75,5 +108,6 @@ export function createEditorialRail(options: EditorialRailOptions): EditorialRai
     themeButtons,
     setTheme,
     setReady,
+    setCollapsed,
   };
 }

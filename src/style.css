@@ -171,6 +171,23 @@ select {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+.stage[data-background-preset="blue"][data-dialectic-surface="paper"] .blue-editorial-panel {
+  background:
+    radial-gradient(circle at 62% 14%, rgba(39, 224, 224, 0.32), transparent 28rem),
+    linear-gradient(180deg, #12b9c2 0%, #087bb5 48%, #071d58 100%);
+  color: #ffffff;
+}
+
+.stage[data-background-preset="blue"][data-dialectic-surface="paper"] .blue-editorial-panel__header,
+.stage[data-background-preset="blue"][data-dialectic-surface="paper"] .blue-editorial-panel__list article,
+.stage[data-background-preset="blue"][data-dialectic-surface="paper"] .blue-editorial-panel > p {
+  border-color: rgba(255, 255, 255, 0.72);
+}
+
+.stage[data-background-preset="blue"][data-dialectic-surface="paper"] .blue-layout__divider {
+  background: rgba(255, 255, 255, 0.76);
+}
+
 .stage[data-background-preset="blue"] .blue-layout__divider {
   z-index: 4;
   display: block;
