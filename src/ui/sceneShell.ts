@@ -32,23 +32,12 @@ export function createSceneShell(options: SceneShellOptions): SceneShell {
       aria-pressed="${dress.id === activeDressId}"
     >
       <canvas class="dress-switcher__thumbnail" data-dress-thumbnail="${dress.id}" aria-hidden="true"></canvas>
-      <span class="dress-switcher__label">${dress.label}</span>
+      <span>${dress.label}</span>
     </button>
   `).join('');
 
   mount.innerHTML = `
     <main class="stage" data-background-preset="${initialThemeId}" aria-label="Ferdinando Sarmi dress study">
-      <div class="mew-editorial-page" aria-hidden="true">
-        <div class="mew-editorial-page__mast">Ferdinando Sarmi</div>
-        <div class="mew-editorial-page__folio">Atelier / Scroll</div>
-        <p class="mew-editorial-page__copy mew-editorial-page__copy--left">
-          Italian born, New York made: Sarmi built evening clothes around color, embroidery, and theatrical fabric light.
-        </p>
-        <p class="mew-editorial-page__copy mew-editorial-page__copy--right">
-          Scroll or swipe to turn the dress; at a half rotation, the next scan enters the holo field.
-        </p>
-      </div>
-      <div class="ivory-portal" aria-hidden="true"></div>
       <div class="wind-editorial-page" aria-hidden="true">
         <header class="wind-editorial-page__header">
           <span>Ferdinando Sarmi</span>

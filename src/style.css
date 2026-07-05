@@ -74,66 +74,6 @@ select {
   inset: 0;
 }
 
-.mew-editorial-page,
-.ivory-portal {
-  display: none;
-}
-
-.stage[data-background-preset="mew-holo"] .mew-editorial-page {
-  position: fixed;
-  inset: 0 var(--editorial-rail-width, 154px) auto 0;
-  z-index: 4;
-  display: block;
-  height: clamp(96px, 15vh, 124px);
-  color: rgba(24, 19, 29, 0.42);
-  font-size: clamp(10px, 1.05vw, 16px);
-  line-height: 1.2;
-  pointer-events: none;
-}
-
-.mew-editorial-page__mast,
-.mew-editorial-page__folio,
-.mew-editorial-page__copy {
-  position: absolute;
-  left: 0;
-  margin: 0;
-}
-
-.mew-editorial-page__mast {
-  top: 0;
-}
-
-.mew-editorial-page__folio {
-  top: 1.2em;
-}
-
-.mew-editorial-page__copy--left {
-  top: 3.5em;
-}
-
-.mew-editorial-page__copy--right {
-  top: 5.7em;
-}
-
-.stage[data-background-preset="mew-holo"] .ivory-portal {
-  position: fixed;
-  top: clamp(96px, 17.2vh, 124px);
-  right: var(--editorial-rail-width, 154px);
-  left: 0;
-  z-index: 0;
-  display: block;
-  height: 100vh;
-  overflow: hidden;
-  color: #ffffff;
-  pointer-events: none;
-}
-
-.ivory-portal__svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
 .stage[data-background-preset="blue"] .blue-layout {
   display: grid;
   grid-template-columns: minmax(420px, 47%) 1px minmax(0, 1fr);
@@ -224,20 +164,10 @@ select {
 
 .stage[data-background-preset="mew-holo"] .dress-switcher {
   position: absolute;
-  top: 18px;
+  top: 12px;
   left: 50%;
   z-index: 6;
   display: flex;
-  gap: 6px;
-  align-items: stretch;
-  width: min(calc(100% - 176px), 1080px);
-  max-width: calc(100% - 28px);
-  padding: 5px;
-  border: 1px solid rgba(244, 239, 229, 0.22);
-  border-radius: 8px;
-  background: rgba(13, 17, 22, 0.34);
-  box-shadow: 0 14px 36px rgba(13, 17, 22, 0.18);
-  backdrop-filter: blur(18px);
   transform: translateX(-50%);
 }
 
@@ -257,30 +187,6 @@ select {
     #ead8b8;
   background-size: 8px 8px;
   cursor: pointer;
-}
-
-.stage[data-background-preset="mew-holo"] .dress-switcher__button {
-  display: flex;
-  flex: 1 1 0;
-  gap: 7px;
-  align-items: center;
-  width: auto;
-  height: auto;
-  min-width: 0;
-  min-height: 34px;
-  margin: 0;
-  padding: 7px 10px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: rgba(255, 250, 241, 0.78);
-}
-
-.stage[data-background-preset="mew-holo"] .dress-switcher__button:hover,
-.stage[data-background-preset="mew-holo"] .dress-switcher__button[data-active="true"] {
-  border-color: rgba(244, 239, 229, 0.26);
-  background: rgba(244, 239, 229, 0.13);
-  color: #fffaf1;
 }
 
 .dress-switcher__button:first-child {
@@ -303,13 +209,6 @@ select {
   height: 100%;
 }
 
-.stage[data-background-preset="mew-holo"] .dress-switcher__thumbnail {
-  flex: 1 1 auto;
-  width: calc(100% - 72px);
-  height: auto;
-  aspect-ratio: 2 / 1;
-}
-
 .dress-switcher__button > span {
   position: absolute;
   right: 5px;
@@ -320,17 +219,6 @@ select {
   font-size: 7px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-}
-
-.stage[data-background-preset="mew-holo"] .dress-switcher__label {
-  position: static;
-  flex: 0 0 auto;
-  padding: 0;
-  background: none;
-  color: inherit;
-  font-size: 12px;
-  letter-spacing: 0;
-  text-transform: none;
 }
 
 .wind-editorial-page {
@@ -545,44 +433,6 @@ select {
 }
 
 @media (max-width: 720px) {
-  .stage[data-background-preset="mew-holo"] .mew-editorial-page {
-    display: none;
-  }
-
-  .stage[data-background-preset="mew-holo"] .ivory-portal {
-    top: 86px;
-  }
-
-  .stage[data-background-preset="mew-holo"] .dress-switcher {
-    top: 8px;
-    width: 146px;
-    max-width: calc(100% - 16px);
-    padding: 4px;
-  }
-
-  .stage[data-background-preset="mew-holo"] .dress-switcher__button {
-    width: 66px;
-    height: 66px;
-    min-height: 66px;
-    padding: 4px;
-  }
-
-  .stage[data-background-preset="mew-holo"] .dress-switcher__thumbnail {
-    width: 100%;
-    aspect-ratio: 1 / 1;
-  }
-
-  .stage[data-background-preset="mew-holo"] .dress-switcher__label {
-    position: absolute;
-    right: 5px;
-    bottom: 4px;
-    padding: 2px 3px;
-    background: rgba(13, 17, 22, 0.46);
-    font-size: 7px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
   .stage[data-background-preset="blue"] .blue-layout {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: 132px minmax(0, 1fr);

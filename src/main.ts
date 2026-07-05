@@ -4716,9 +4716,8 @@ function buildIvoryPortal() {
     return;
   }
 
-  const canvasBounds = canvasElement.getBoundingClientRect();
-  const w = Math.max(294, Math.round(canvasBounds.width || window.innerWidth));
-  const h = Math.max(360, Math.round(canvasBounds.height || window.innerHeight));
+  const w = Math.max(360, Math.round(window.innerWidth));
+  const h = Math.max(360, Math.round(window.innerHeight));
   const mobilePortal = w < 560;
 
   // Mobile keeps the side columns thin so the dome banner doesn't waste width;
