@@ -58,23 +58,13 @@ select {
   pointer-events: none;
 }
 
-.stage[data-background-preset="mew-holo"] {
-  background:
-    url("/editorial/sarmi-background-horizontal.png") center / cover no-repeat,
-    #e7d2ad;
-}
-
-.stage[data-background-preset="mew-holo"]::after {
-  display: none;
-}
-
 .mew-editorial-page {
   position: fixed;
   inset: 0 var(--editorial-rail-width, 154px) 0 0;
-  z-index: 2;
+  z-index: 3;
   display: none;
   overflow: hidden;
-  color: rgba(35, 27, 21, 0.72);
+  color: rgba(35, 27, 21, 0.7);
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
   pointer-events: none;
 }
@@ -189,7 +179,7 @@ select {
   font-size: clamp(12px, 0.9vw, 15px);
   line-height: 1.52;
   letter-spacing: 0.014em;
-  text-shadow: 0 0 20px rgba(244, 226, 194, 0.78);
+  text-shadow: 0 0 20px rgba(255, 255, 255, 0.66);
 }
 
 .mew-editorial-page__copy--left {
@@ -345,7 +335,7 @@ select {
   height: 100%;
 }
 
-.dress-switcher__button > span {
+.dress-switcher__button > span:last-child {
   position: absolute;
   right: 5px;
   bottom: 4px;
@@ -569,12 +559,6 @@ select {
 }
 
 @media (max-width: 720px) {
-  .stage[data-background-preset="mew-holo"] {
-    background:
-      url("/editorial/sarmi-background-vertical.jpg") center / cover no-repeat,
-      #e7d2ad;
-  }
-
   .mew-editorial-page__header {
     top: 16px;
     left: 14px;

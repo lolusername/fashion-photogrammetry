@@ -340,12 +340,6 @@ const cinematicSettings = {
   warmHighlights: 0.018,
   blackLift: 0.009,
 };
-const themeObjectPostSettings = {
-  mewBloom: 0.07,
-  mewBlur: 0.018,
-  ivoryBloom: 0.018,
-  ivoryBlur: 0.038,
-};
 const TABLA_RASA_ACCENT_COLORS = [
   0xfdfefe,
   0xf0f4f7,
@@ -1272,39 +1266,31 @@ function animate(timestamp?: number) {
   const ivoryThemeActive = cycloramaBackgroundSettings.preset === 'ivory-holo';
   const signalThemeActive = cycloramaBackgroundSettings.preset === 'signal-black';
   const objectPostThemeActive = invisibleCitiesActive || ivoryThemeActive;
-  const objectBlurAmount = invisibleCitiesActive
-    ? themeObjectPostSettings.mewBlur
-    : ivoryThemeActive
-    ? themeObjectPostSettings.ivoryBlur
-    : 0;
+  const objectBlurAmount = invisibleCitiesActive ? 0.018 : ivoryThemeActive ? 0.038 : 0;
 
-  bloomPass.threshold = invisibleCitiesActive
-    ? 0.84
-    : ivoryThemeActive
-    ? 0.82
-    : blueThemeActive || signalThemeActive
+  bloomPass.threshold = blueThemeActive || invisibleCitiesActive || ivoryThemeActive || signalThemeActive
     ? 1.35
     : BLOOM_THRESHOLD;
   bloomPass.strength = blueThemeActive
     ? 0
     : ivoryThemeActive
-    ? themeObjectPostSettings.ivoryBloom
+    ? 0.002
     : invisibleCitiesActive
-    ? themeObjectPostSettings.mewBloom * (1 + pointerWind.activity * 0.28)
+    ? 0.004 + pointerWind.activity * 0.014
     : signalThemeActive
     ? 0.01
     : BLOOM_BASE_STRENGTH + pointerWind.activity * BLOOM_WIND_STRENGTH;
   bloomPass.radius = blueThemeActive
     ? 0
     : ivoryThemeActive
-    ? 0.06
+    ? 0.03
     : invisibleCitiesActive
-    ? 0.22 + pointerWind.activity * 0.035
+    ? 0.04 + pointerWind.activity * 0.025
     : signalThemeActive
     ? 0.05
     : BLOOM_BASE_RADIUS + pointerWind.activity * BLOOM_WIND_RADIUS;
-  bokehPass.enabled = objectPostThemeActive && objectBlurAmount > 0.0001;
-  if (bokehPass.enabled) {
+  bokehPass.enabled = objectPostThemeActive;
+  if (objectPostThemeActive) {
     bokehUniforms.focus.value = camera.position.distanceTo(focusTarget);
     bokehUniforms.aperture.value = objectBlurAmount * 0.5;
     bokehUniforms.maxblur.value = objectBlurAmount;
@@ -1312,7 +1298,7 @@ function animate(timestamp?: number) {
   }
   syncIvoryBackgroundOpticsPass(ivoryThemeActive);
   syncCinematicFinishPass();
-  syncMewAlphaFeatherPass(false);
+  syncMewAlphaFeatherPass(invisibleCitiesActive);
 
   if (dressTransitionFx > 0) {
     dressTransitionFx = Math.max(0, dressTransitionFx - delta / DRESS_TRANSITION_FX_DURATION);
@@ -1333,7 +1319,10 @@ function animate(timestamp?: number) {
         object.visible = true;
       });
     }
-    renderSharpSubjectOverlay(delta, { hideGhosts: ivoryThemeActive });
+    renderSharpSubjectOverlay(delta, {
+      direct: invisibleCitiesActive,
+      hideGhosts: ivoryThemeActive,
+    });
   } else {
     composer.render(delta);
   }
@@ -1351,17 +1340,6 @@ function animate(timestamp?: number) {
   animationFrame = window.requestAnimationFrame(animate);
 }
 
-function getVisibleSubjectObjects() {
-  const objects: THREE.Object3D[] = [];
-  objects.push(...getVisibleFullDressObjects());
-
-  if (dressGhostGroup.visible) {
-    objects.push(dressGhostGroup);
-  }
-
-  return objects;
-}
-
 function getVisibleFullDressObjects() {
   const objects: THREE.Object3D[] = [];
   fullDressCache.forEach((record) => {
@@ -1373,7 +1351,21 @@ function getVisibleFullDressObjects() {
   return objects;
 }
 
-function renderSharpSubjectOverlay(delta: number, options: { hideGhosts?: boolean } = {}) {
+function getVisibleSubjectObjects() {
+  const objects: THREE.Object3D[] = [];
+  objects.push(...getVisibleFullDressObjects());
+
+  if (dressGhostGroup.visible) {
+    objects.push(dressGhostGroup);
+  }
+
+  return objects;
+}
+
+function renderSharpSubjectOverlay(
+  delta: number,
+  options: { direct?: boolean; hideGhosts?: boolean } = {},
+) {
   const hiddenObjects: THREE.Object3D[] = [];
   [cycloramaMesh, infiniteBackdropMesh, holoAccentGroup, ivorySculptureGroup, photoPrintGroup, yellowBacking, paperRollMesh].forEach((object) => {
     if (object) {
@@ -1393,11 +1385,17 @@ function renderSharpSubjectOverlay(delta: number, options: { hideGhosts?: boolea
 
   scene.background = null;
   try {
-    sharpSubjectRenderPass.clearAlpha = 0;
-    sharpSubjectComposer.render(delta);
-    renderer.setRenderTarget(null);
-    renderer.autoClear = false;
-    renderer.render(sharpSubjectOverlayScene, sharpSubjectOverlayCamera);
+    if (options.direct) {
+      renderer.autoClear = false;
+      renderer.clearDepth();
+      renderer.render(scene, camera);
+    } else {
+      sharpSubjectRenderPass.clearAlpha = 0;
+      sharpSubjectComposer.render(delta);
+      renderer.setRenderTarget(null);
+      renderer.autoClear = false;
+      renderer.render(sharpSubjectOverlayScene, sharpSubjectOverlayCamera);
+    }
   } finally {
     renderer.autoClear = previousAutoClear;
     scene.background = previousBackground;
@@ -2614,39 +2612,45 @@ function createInfiniteBackdropMaterial() {
 
       vec3 mewBackdrop(vec2 uv) {
         vec2 warped = uv;
-        warped.x += sin(uv.y * 4.2 + uBackdropTime * 0.045) * 0.014;
-        warped.y += sin(uv.x * 3.8 - uBackdropTime * 0.038) * 0.012;
+        warped.x += sin(uv.y * 5.2 + uBackdropTime * 0.09) * 0.035;
+        warped.y += sin(uv.x * 4.6 - uBackdropTime * 0.07) * 0.03;
         warped += vec2(
-          sin((uv.x + uv.y) * 6.0 + uBackdropTime * 0.03),
-          cos((uv.x - uv.y) * 5.0 - uBackdropTime * 0.026)
-        ) * 0.007;
+          sin((uv.x + uv.y) * 8.0 + uBackdropTime * 0.06),
+          cos((uv.x - uv.y) * 7.0 - uBackdropTime * 0.05)
+        ) * 0.018;
 
-        vec3 color = sampleEditorialPaper(warped);
-        vec3 fadedRose = vec3(0.72, 0.27, 0.31);
-        vec3 oxidizedTeal = vec3(0.12, 0.38, 0.38);
-        vec3 inkBlue = vec3(0.08, 0.16, 0.25);
-        vec3 antiqueGold = vec3(0.73, 0.49, 0.2);
-        float roseField = softBlob(warped, vec2(0.18, 0.7), vec2(0.78, 1.05), 0.52, 0.34);
-        float tealField = softBlob(warped, vec2(0.82, 0.38), vec2(0.86, 0.8), 0.52, 0.34);
-        float blueField = softBlob(warped, vec2(0.48, 0.6), vec2(0.92, 0.76), 0.48, 0.34);
-        float goldField = softBlob(warped, vec2(0.7, 0.84), vec2(0.86, 1.1), 0.4, 0.32);
-        color = mix(color, screenBlend(color, fadedRose), roseField * 0.18);
-        color = mix(color, screenBlend(color, oxidizedTeal), tealField * 0.16);
-        color = mix(color, screenBlend(color, inkBlue), blueField * 0.1);
-        color = mix(color, screenBlend(color, antiqueGold), goldField * 0.12);
+        vec3 cyan = vec3(0.35, 0.92, 1.0);
+        vec3 mint = vec3(0.43, 1.0, 0.28);
+        vec3 acid = vec3(0.88, 1.0, 0.12);
+        vec3 pink = vec3(1.0, 0.16, 0.68);
+        vec3 pearl = vec3(1.0, 0.86, 0.96);
+        vec3 violet = vec3(0.48, 0.34, 1.0);
 
-        float fineFoil = pow(
-          smoothstep(
-            0.88,
-            1.0,
-            sin((warped.x * 15.0 + warped.y * 11.0 + uBackdropTime * 0.05) * 6.2831853) * 0.5 + 0.5
-          ),
-          3.0
-        );
-        color += vec3(0.18, 0.13, 0.08) * fineFoil * 0.025;
-        float grain = hash(floor((uv + uBackdropTime * 0.002) * vec2(520.0, 390.0))) - 0.5;
-        color += grain * 0.008;
-        return clamp(color, 0.0, 1.0);
+        float mintPool = softBlob(warped, vec2(0.2, 0.26), vec2(0.75, 1.08), 0.64, 0.38);
+        float pinkPool = softBlob(warped, vec2(0.72, 0.46), vec2(1.08, 0.78), 0.52, 0.34);
+        float yellowPool = softBlob(warped, vec2(0.78, 0.84), vec2(0.86, 1.16), 0.4, 0.32);
+        float violetPool = softBlob(warped, vec2(0.32, 0.74), vec2(1.18, 0.92), 0.45, 0.34);
+        float diagonalSheen = pow(smoothstep(0.78, 1.0, sin((warped.x * 3.2 - warped.y * 2.5 + 0.18) * 6.2831853) * 0.5 + 0.5), 4.2);
+        float fineFoil = pow(smoothstep(0.86, 1.0, sin((warped.x * 15.0 + warped.y * 12.0 + uBackdropTime * 0.12) * 6.2831853) * 0.5 + 0.5), 3.0);
+
+        vec3 color = cyan;
+        color = mix(color, mint, mintPool * 0.9);
+        color = mix(color, pink, pinkPool * 0.78);
+        color = mix(color, acid, yellowPool * 0.72);
+        color = mix(color, violet, violetPool * 0.44);
+        color = mix(color, pearl, diagonalSheen * 0.28 + fineFoil * 0.12);
+
+        float shardA = smoothstep(0.035, 0.0, lineDistance(warped, vec2(0.08, 0.78), vec2(0.88, 0.2)));
+        float shardB = smoothstep(0.026, 0.0, lineDistance(warped, vec2(0.0, 0.3), vec2(0.72, 0.88)));
+        float shardC = smoothstep(0.02, 0.0, lineDistance(warped, vec2(0.5, 0.02), vec2(1.0, 0.58)));
+        color += vec3(1.0, 0.96, 0.68) * shardA * 0.12;
+        color += vec3(0.4, 1.0, 0.7) * shardB * 0.1;
+        color += vec3(1.0, 0.24, 0.76) * shardC * 0.1;
+
+        float grain = hash(floor((uv + uBackdropTime * 0.006) * vec2(520.0, 390.0))) - 0.5;
+        color += grain * 0.045;
+        float luminance = dot(color, vec3(0.299, 0.587, 0.114));
+        return clamp(mix(vec3(luminance), color, 1.48), 0.0, 1.0);
       }
 
       vec3 windArchiveBackdrop(vec2 uv) {
@@ -2894,12 +2898,12 @@ function addMewHoloAccents(targetScene: THREE.Scene) {
     return rememberHoloPaletteMaterial(material, color, opacity);
   };
 
-  const pink = makeMaterial(0xb55249, 0.2);
-  const green = makeMaterial(0x75846a, 0.18);
-  const yellow = makeMaterial(0xb78a3d, 0.22);
-  const cyan = makeMaterial(0x4c7978, 0.18);
-  const violet = makeMaterial(0x574c5e, 0.16);
-  const pearl = makeMaterial(0xd8c4a0, 0.24);
+  const pink = makeMaterial(0xff22b8, 0.34);
+  const green = makeMaterial(0x63ff28, 0.34);
+  const yellow = makeMaterial(0xffec0f, 0.4);
+  const cyan = makeMaterial(0x35f1ff, 0.3);
+  const violet = makeMaterial(0x8d45ff, 0.26);
+  const pearl = makeMaterial(0xfff1c4, 0.38);
 
   const shardGeometry = trackGeometry(createShardGeometry());
   const longShardGeometry = trackGeometry(createLongShardGeometry());
@@ -3089,11 +3093,11 @@ function createGroundedIvoryAmphora(marbleMaterial: THREE.Material, glossMateria
 
 function addMewHoloSculptures(group: THREE.Group) {
   const marbleMaterial = createHoloMarbleMaterial();
-  const pinkGloss = createCandyGlossMaterial(0xa64e45, 0.54);
-  const greenGloss = createCandyGlossMaterial(0x6f8067, 0.5);
-  const yellowGloss = createCandyGlossMaterial(0xb3853b, 0.54);
-  const cyanGloss = createCandyGlossMaterial(0x477473, 0.48);
-  const violetGloss = createCandyGlossMaterial(0x51465a, 0.46);
+  const pinkGloss = createCandyGlossMaterial(0xff2db6, 0.72);
+  const greenGloss = createCandyGlossMaterial(0x75ff2c, 0.68);
+  const yellowGloss = createCandyGlossMaterial(0xffe80f, 0.72);
+  const cyanGloss = createCandyGlossMaterial(0x27eaff, 0.58);
+  const violetGloss = createCandyGlossMaterial(0x8d55ff, 0.62);
 
   const blobGeometry = trackGeometry(new THREE.SphereGeometry(1, 32, 18));
   const gemGeometry = trackGeometry(new THREE.OctahedronGeometry(0.45, 1));
@@ -4495,20 +4499,25 @@ function syncCinematicFinishPass() {
 function syncCinematicUniforms(pass: ShaderPass) {
   const uniforms = pass.uniforms as Record<string, THREE.IUniform<number | THREE.Vector2>>;
   const holoEditorialActive = isHoloScrollTheme();
+  const chromaticInvisibleCitiesActive = cycloramaBackgroundSettings.preset === 'mew-holo';
   uniforms.uTime.value = shaderTime;
   (uniforms.uResolution.value as THREE.Vector2).set(
     Math.max(1, canvasElement.width),
     Math.max(1, canvasElement.height),
   );
   uniforms.uEnabled.value = cinematicSettings.enabled ? 1 : 0;
-  uniforms.uFilmGrain.value = cinematicSettings.filmGrain;
-  uniforms.uDiffusion.value = cinematicSettings.diffusion;
-  uniforms.uHalation.value = cinematicSettings.halation;
+  uniforms.uFilmGrain.value = chromaticInvisibleCitiesActive ? 0.018 : cinematicSettings.filmGrain;
+  uniforms.uDiffusion.value = chromaticInvisibleCitiesActive ? 0 : cinematicSettings.diffusion;
+  uniforms.uHalation.value = chromaticInvisibleCitiesActive ? 0 : cinematicSettings.halation;
   uniforms.uVignette.value = holoEditorialActive ? 0 : cinematicSettings.vignette;
-  uniforms.uSaturation.value = holoEditorialActive ? Math.max(cinematicSettings.saturation, 1.09) : cinematicSettings.saturation;
-  uniforms.uContrast.value = cinematicSettings.contrast;
-  uniforms.uWarmHighlights.value = cinematicSettings.warmHighlights;
-  uniforms.uBlackLift.value = cinematicSettings.blackLift;
+  uniforms.uSaturation.value = chromaticInvisibleCitiesActive
+    ? 1
+    : holoEditorialActive
+    ? Math.max(cinematicSettings.saturation, 1.09)
+    : cinematicSettings.saturation;
+  uniforms.uContrast.value = chromaticInvisibleCitiesActive ? 1 : cinematicSettings.contrast;
+  uniforms.uWarmHighlights.value = chromaticInvisibleCitiesActive ? 0 : cinematicSettings.warmHighlights;
+  uniforms.uBlackLift.value = chromaticInvisibleCitiesActive ? 0 : cinematicSettings.blackLift;
 }
 
 function syncMewAlphaFeatherPass(enabled: boolean) {

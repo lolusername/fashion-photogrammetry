@@ -74,7 +74,7 @@ export function createSceneShell(options: SceneShellOptions): SceneShell {
           Italian born, New York made. Sarmi built evening clothes around color, embroidery, and theatrical fabric light.
         </p>
         <p class="mew-editorial-page__copy mew-editorial-page__copy--right">
-          Scroll or swipe to turn the dress. At a half rotation, the next scan enters the paper field.
+          Scroll or swipe to turn the dress. At a half rotation, the next scan enters the chromatic field.
         </p>
       </div>
       <div class="wind-editorial-page" aria-hidden="true">
