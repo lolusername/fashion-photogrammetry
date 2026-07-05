@@ -1339,8 +1339,8 @@ function animate(timestamp?: number) {
     DRESS_TRANSITION_FX_ENABLED && dressTransitionFx > 0 && (blueThemeActive || scrollThemeActive);
 
   controls.update(delta);
-  if (objectPostThemeActive && subjectMotion.pivot) {
-    const hiddenSubjectObjects = ivoryThemeActive ? getVisibleFullDressObjects() : getVisibleSubjectObjects();
+  if (subjectMotion.pivot) {
+    const hiddenSubjectObjects = getVisibleSubjectObjects();
     try {
       hiddenSubjectObjects.forEach((object) => {
         object.visible = false;
@@ -1352,8 +1352,7 @@ function animate(timestamp?: number) {
       });
     }
     renderSharpSubjectOverlay(delta, {
-      direct: invisibleCitiesActive,
-      hideGhosts: ivoryThemeActive,
+      direct: true,
     });
   } else {
     composer.render(delta);
