@@ -238,6 +238,7 @@ const experienceControls = createExperienceControls({
 });
 
 const canvas = sceneShell.canvas;
+const mewForegroundCanvasElement = sceneShell.mewForegroundCanvas;
 const stageElement = sceneShell.stage;
 const status = sceneShell.status;
 const backgroundButtons = editorialRail.themeButtons;
@@ -251,6 +252,9 @@ const signalDiptychElement = app.querySelector<HTMLDivElement>('.signal-diptych'
 const loadingOverlayElement = sceneShell.loadingOverlay;
 const loadingDetailElement = sceneShell.loadingDetail;
 const dialecticPaperToggle = app.querySelector<HTMLButtonElement>('[data-dialectic-paper-toggle]');
+const mewTitleOpacityInput = app.querySelector<HTMLInputElement>('[data-mew-title-opacity]');
+const mewTitleOpacityValue = app.querySelector<HTMLOutputElement>('[data-mew-title-opacity-value]');
+const mewTitleWordElement = app.querySelector<HTMLSpanElement>('.mew-editorial-page__mast span:last-child');
 
 const statusElement = status;
 const canvasElement = canvas;
@@ -687,8 +691,23 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.shadowMap.enabled = false;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 
+const mewForegroundRenderer = new THREE.WebGLRenderer({
+  canvas: mewForegroundCanvasElement,
+  alpha: true,
+  antialias: true,
+  powerPreference: 'high-performance',
+});
+mewForegroundRenderer.setClearColor(0x000000, 0);
+mewForegroundRenderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
+mewForegroundRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+mewForegroundRenderer.toneMappingExposure = 0.64;
+mewForegroundRenderer.outputColorSpace = THREE.SRGBColorSpace;
+mewForegroundRenderer.shadowMap.enabled = false;
+
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+const mewForegroundPmrem = new THREE.PMREMGenerator(mewForegroundRenderer);
+const mewForegroundEnvironment = mewForegroundPmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -788,11 +807,38 @@ const sharpSubjectOverlayMaterial = new THREE.MeshBasicMaterial({
 });
 sharpSubjectOverlayScene.add(new THREE.Mesh(sharpSubjectOverlayGeometry, sharpSubjectOverlayMaterial));
 
+const mewTitleOverlayCanvas = document.createElement('canvas');
+const maybeMewTitleOverlayContext = mewTitleOverlayCanvas.getContext('2d');
+if (!maybeMewTitleOverlayContext) {
+  throw new Error('Could not create the Invisible Cities title overlay.');
+}
+const mewTitleOverlayContext: CanvasRenderingContext2D = maybeMewTitleOverlayContext;
+const mewTitleOverlayTexture = new THREE.CanvasTexture(mewTitleOverlayCanvas);
+mewTitleOverlayTexture.colorSpace = THREE.SRGBColorSpace;
+mewTitleOverlayTexture.minFilter = THREE.LinearFilter;
+mewTitleOverlayTexture.magFilter = THREE.LinearFilter;
+const mewTitleOverlayScene = new THREE.Scene();
+const mewTitleOverlayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const mewTitleOverlayGeometry = new THREE.PlaneGeometry(2, 2);
+const mewTitleOverlayMaterial = new THREE.MeshBasicMaterial({
+  map: mewTitleOverlayTexture,
+  transparent: true,
+  depthTest: false,
+  depthWrite: false,
+  toneMapped: false,
+});
+mewTitleOverlayScene.add(new THREE.Mesh(mewTitleOverlayGeometry, mewTitleOverlayMaterial));
+
 statusElement.textContent = 'Starting load';
 
 let animationFrame = 0;
 let shaderTime = 0;
 let dressTransitionFx = 0;
+let mewTitleBlackOpacity = THREE.MathUtils.clamp(
+  Number(mewTitleOpacityInput?.value ?? 100),
+  0,
+  100,
+) / 100;
 let windController: DressWindController | null = null;
 let armBloomController: ArmBloomController | null = null;
 let disposed = false;
@@ -984,6 +1030,12 @@ function hideLoadingOverlay() {
 
 async function loadDressAsset(assetId: DressAssetId, useLoadingOverlay = false) {
   if (activeFullDress?.asset.id === assetId) {
+    if (dressAssetSettings.asset !== assetId) {
+      dressLoadToken += 1;
+      dressAssetSettings.asset = assetId;
+      updateDressAssetButtons(false);
+      updateGhostVisibility();
+    }
     return;
   }
 
@@ -1021,8 +1073,12 @@ async function loadDressAsset(assetId: DressAssetId, useLoadingOverlay = false) 
         });
       }
 
-      if (token !== dressLoadToken || disposed || !record) {
+      if (token !== dressLoadToken || disposed) {
         return;
+      }
+
+      if (!record) {
+        throw new Error(`Could not prepare ${asset.label}.`);
       }
 
       fullDressCache.set(assetId, record);
@@ -1053,7 +1109,6 @@ async function loadDressAsset(assetId: DressAssetId, useLoadingOverlay = false) 
     updateGhostVisibility();
     statusElement.textContent = error instanceof Error ? error.message : `Failed to load ${asset.url}`;
     statusElement.dataset.error = 'true';
-    throw error;
   } finally {
     if (token === dressLoadToken) {
       updateDressAssetButtons(false);
@@ -1351,9 +1406,13 @@ function animate(timestamp?: number) {
         object.visible = true;
       });
     }
-    renderSharpSubjectOverlay(delta, {
-      direct: true,
-    });
+    if (invisibleCitiesActive) {
+      renderMewForeground();
+    } else {
+      renderSharpSubjectOverlay(delta, {
+        direct: true,
+      });
+    }
   } else {
     composer.render(delta);
   }
@@ -1391,6 +1450,41 @@ function getVisibleSubjectObjects() {
   }
 
   return objects;
+}
+
+function renderMewForeground() {
+  const hiddenObjects: THREE.Object3D[] = [];
+  [cycloramaMesh, infiniteBackdropMesh, holoAccentGroup, ivorySculptureGroup, photoPrintGroup, yellowBacking, paperRollMesh].forEach((object) => {
+    if (object) {
+      hiddenObjects.push(object);
+    }
+  });
+  const previousVisibility = hiddenObjects.map((object) => object.visible);
+  const previousBackground = scene.background;
+  const previousEnvironment = scene.environment;
+
+  hiddenObjects.forEach((object) => {
+    object.visible = false;
+  });
+  scene.background = null;
+  scene.environment = mewForegroundEnvironment;
+
+  try {
+    mewForegroundRenderer.setRenderTarget(null);
+    mewForegroundRenderer.autoClear = true;
+    mewForegroundRenderer.clear(true, true, true);
+    mewForegroundRenderer.autoClear = false;
+    mewForegroundRenderer.render(mewTitleOverlayScene, mewTitleOverlayCamera);
+    mewForegroundRenderer.clearDepth();
+    mewForegroundRenderer.render(scene, camera);
+  } finally {
+    mewForegroundRenderer.autoClear = true;
+    scene.background = previousBackground;
+    scene.environment = previousEnvironment;
+    hiddenObjects.forEach((object, index) => {
+      object.visible = previousVisibility[index];
+    });
+  }
 }
 
 function renderSharpSubjectOverlay(
@@ -4385,9 +4479,20 @@ function updateCycloramaBackgroundUrl(presetId: CycloramaBackgroundPresetId) {
 
 function handleDressAssetClick(event: MouseEvent) {
   const assetId = (event.currentTarget as HTMLButtonElement).dataset.dressAsset;
+  const activeAssetId = activeFullDress?.asset.id;
 
-  if (isDressAssetId(assetId) && assetId !== dressAssetSettings.asset) {
+  if (isDressAssetId(assetId) && assetId !== activeAssetId) {
     void loadDressAsset(assetId);
+  }
+}
+
+function handleMewTitleOpacityInput(event: Event) {
+  const input = event.currentTarget as HTMLInputElement;
+  const percent = THREE.MathUtils.clamp(Number(input.value), 0, 100);
+  mewTitleBlackOpacity = percent / 100;
+  updateMewTitleOverlayTexture();
+  if (mewTitleOpacityValue) {
+    mewTitleOpacityValue.value = `${Math.round(percent)}%`;
   }
 }
 
@@ -4794,6 +4899,9 @@ function resize() {
 
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
   renderer.setSize(width, height, false);
+  mewForegroundRenderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
+  mewForegroundRenderer.setSize(width, height, false);
+  updateMewTitleOverlayTexture();
   composer.setSize(width, height);
   subjectFxComposer.setSize(width, height);
   sharpSubjectComposer.setSize(width, height);
@@ -4810,6 +4918,61 @@ function resize() {
 
   buildIvoryPortal();
   buildSignalDiptych();
+}
+
+function updateMewTitleOverlayTexture() {
+  if (!mewTitleWordElement) {
+    return;
+  }
+
+  const canvasBounds = canvasElement.getBoundingClientRect();
+  const width = Math.max(1, canvasElement.width);
+  const height = Math.max(1, canvasElement.height);
+  if (canvasBounds.width <= 0 || canvasBounds.height <= 0) {
+    return;
+  }
+
+  if (mewTitleOverlayCanvas.width !== width || mewTitleOverlayCanvas.height !== height) {
+    mewTitleOverlayCanvas.width = width;
+    mewTitleOverlayCanvas.height = height;
+  } else {
+    mewTitleOverlayContext.clearRect(0, 0, width, height);
+  }
+
+  const range = document.createRange();
+  range.selectNodeContents(mewTitleWordElement);
+  const wordBounds = range.getBoundingClientRect();
+  range.detach();
+
+  const style = window.getComputedStyle(mewTitleWordElement);
+  const scaleX = width / canvasBounds.width;
+  const scaleY = height / canvasBounds.height;
+  const fontSize = Number.parseFloat(style.fontSize) * scaleY;
+  const letterSpacing = Number.parseFloat(style.letterSpacing) * scaleX;
+  const text = mewTitleWordElement.textContent?.trim() || 'System';
+  const x = (wordBounds.left - canvasBounds.left) * scaleX;
+  const top = (wordBounds.top - canvasBounds.top) * scaleY;
+
+  mewTitleOverlayContext.clearRect(0, 0, width, height);
+  mewTitleOverlayContext.font = `${style.fontWeight} ${fontSize}px ${style.fontFamily}`;
+  mewTitleOverlayContext.textBaseline = 'alphabetic';
+  (mewTitleOverlayContext as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing =
+    `${letterSpacing}px`;
+
+  const metrics = mewTitleOverlayContext.measureText(text);
+  const measuredWidth = Math.max(1, metrics.width);
+  const targetWidth = Math.max(1, wordBounds.width * scaleX);
+  const inkHeight = metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent;
+  const targetHeight = Math.max(1, wordBounds.height * scaleY);
+  const baseline = top + Math.max(0, (targetHeight - inkHeight) * 0.5) + metrics.actualBoundingBoxAscent;
+  mewTitleOverlayContext.save();
+  mewTitleOverlayContext.translate(x, baseline);
+  mewTitleOverlayContext.scale(targetWidth / measuredWidth, 1);
+  mewTitleOverlayContext.globalAlpha = mewTitleBlackOpacity;
+  mewTitleOverlayContext.fillStyle = '#0b0b0b';
+  mewTitleOverlayContext.fillText(text, 0, 0);
+  mewTitleOverlayContext.restore();
+  mewTitleOverlayTexture.needsUpdate = true;
 }
 
 // Différance portal: a near-black arch with knockout type that reveals the live
@@ -5312,6 +5475,7 @@ backgroundButtons.forEach((button) => button.addEventListener('click', handleCyc
 dressButtons.forEach((button) => button.addEventListener('click', handleDressAssetClick));
 dressNavigationButtons.forEach((button) => button.addEventListener('click', handleDressNavigationClick));
 dialecticPaperToggle?.addEventListener('click', handleDialecticPaperToggle);
+mewTitleOpacityInput?.addEventListener('input', handleMewTitleOpacityInput);
 if (signalDiptychElement) {
   signalDiptychElement.addEventListener('click', handleSignalNodeClick);
   signalDiptychElement.addEventListener('keydown', handleSignalNodeKeydown);
@@ -5353,6 +5517,7 @@ function dispose() {
   dressButtons.forEach((button) => button.removeEventListener('click', handleDressAssetClick));
   dressNavigationButtons.forEach((button) => button.removeEventListener('click', handleDressNavigationClick));
   dialecticPaperToggle?.removeEventListener('click', handleDialecticPaperToggle);
+  mewTitleOpacityInput?.removeEventListener('input', handleMewTitleOpacityInput);
   if (signalDiptychElement) {
     signalDiptychElement.removeEventListener('click', handleSignalNodeClick);
     signalDiptychElement.removeEventListener('keydown', handleSignalNodeKeydown);
@@ -5386,6 +5551,9 @@ function dispose() {
   sharpSubjectRenderTarget.dispose();
   sharpSubjectOverlayMaterial.dispose();
   sharpSubjectOverlayGeometry.dispose();
+  mewTitleOverlayTexture.dispose();
+  mewTitleOverlayMaterial.dispose();
+  mewTitleOverlayGeometry.dispose();
   signalGraphNodeRecords.forEach((record) => record.renderer.dispose());
   signalGraphNodeRecords.clear();
   timer.dispose();
@@ -5393,6 +5561,9 @@ function dispose() {
   disposableMaterials.forEach((material) => material.dispose());
   disposableTextures.forEach((texture) => texture.dispose());
   scene.environment?.dispose();
+  mewForegroundEnvironment.dispose();
+  mewForegroundPmrem.dispose();
+  mewForegroundRenderer.dispose();
   pmrem.dispose();
   renderer.dispose();
 }

@@ -4,6 +4,7 @@ import type { PublicThemeId } from '../config/themes';
 export type SceneShell = {
   stage: HTMLElement;
   canvas: HTMLCanvasElement;
+  mewForegroundCanvas: HTMLCanvasElement;
   status: HTMLElement;
   loadingOverlay: HTMLElement;
   loadingDetail: HTMLElement;
@@ -51,6 +52,19 @@ export function createSceneShell(options: SceneShellOptions): SceneShell {
           Scroll or swipe to turn the dress. At a half rotation, the next scan enters the chromatic field.
         </p>
       </div>
+      <label class="mew-title-opacity-control">
+        <span>Title black</span>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          value="100"
+          data-mew-title-opacity
+          aria-label="Invisible Cities title black opacity"
+        />
+        <output data-mew-title-opacity-value>100%</output>
+      </label>
       <div class="wind-editorial-page" aria-hidden="true">
         <header class="wind-editorial-page__header">
           <span>Fashion System</span>
@@ -95,6 +109,7 @@ export function createSceneShell(options: SceneShellOptions): SceneShell {
         <div class="blue-layout__divider" aria-hidden="true"></div>
         <section class="blue-layout__right-pane">
           <canvas class="stage__canvas" aria-label="Three.js rendered dress scene"></canvas>
+          <canvas class="mew-foreground-canvas" aria-hidden="true"></canvas>
           <div class="dress-switcher" aria-label="Dress assets" role="group">
             ${dressTiles}
           </div>
@@ -112,6 +127,7 @@ export function createSceneShell(options: SceneShellOptions): SceneShell {
   return {
     stage: requireElement<HTMLElement>(mount, '.stage'),
     canvas: requireElement<HTMLCanvasElement>(mount, '.stage__canvas'),
+    mewForegroundCanvas: requireElement<HTMLCanvasElement>(mount, '.mew-foreground-canvas'),
     status: requireElement<HTMLElement>(mount, '[data-status]'),
     loadingOverlay: requireElement<HTMLElement>(mount, '[data-loading-overlay]'),
     loadingDetail: requireElement<HTMLElement>(mount, '[data-loading-detail]'),

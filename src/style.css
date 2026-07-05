@@ -107,6 +107,38 @@ select {
   letter-spacing: -0.072em;
 }
 
+.mew-title-opacity-control {
+  position: fixed;
+  top: 16px;
+  right: calc(var(--editorial-rail-width, 154px) + 16px);
+  z-index: 12;
+  display: none;
+  grid-template-columns: auto minmax(120px, 180px) 38px;
+  gap: 9px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid rgba(17, 17, 17, 0.28);
+  background: rgba(255, 255, 255, 0.82);
+  color: #111111;
+  font: 600 8px/1 Arial, Helvetica, sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  backdrop-filter: blur(12px);
+}
+
+.stage[data-background-preset="mew-holo"] .mew-title-opacity-control {
+  display: grid;
+}
+
+.mew-title-opacity-control input {
+  width: 100%;
+  accent-color: #111111;
+}
+
+.mew-title-opacity-control output {
+  text-align: right;
+}
+
 .mew-editorial-page__mast span {
   display: block;
 }
@@ -114,6 +146,7 @@ select {
 .mew-editorial-page__mast span:last-child {
   margin-top: 0.08em;
   margin-left: 31%;
+  visibility: hidden;
 }
 
 .mew-editorial-page__folio {
@@ -519,6 +552,25 @@ select {
     drop-shadow(0 0 34px rgba(95, 255, 221, 0.16));
 }
 
+.mew-foreground-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: none;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.stage[data-background-preset="mew-holo"] .mew-foreground-canvas {
+  top: 50%;
+  left: 50%;
+  display: block;
+  width: min(90%, 1760px);
+  height: min(82vh, 1020px);
+  transform: translate(-50%, -50%);
+}
+
 .stage__status {
   position: fixed;
   bottom: 16px;
@@ -680,6 +732,11 @@ select {
   }
 
   .stage[data-background-preset="mew-holo"] .stage__canvas {
+    width: calc(100% - 10px);
+    height: 78vh;
+  }
+
+  .stage[data-background-preset="mew-holo"] .mew-foreground-canvas {
     width: calc(100% - 10px);
     height: 78vh;
   }
