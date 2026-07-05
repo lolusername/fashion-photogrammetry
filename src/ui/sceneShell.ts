@@ -39,37 +39,8 @@ export function createSceneShell(options: SceneShellOptions): SceneShell {
   mount.innerHTML = `
     <main class="stage" data-background-preset="${initialThemeId}" aria-label="Ferdinando Sarmi dress study">
       <div class="mew-editorial-page" aria-hidden="true">
-        <header class="mew-editorial-page__header">
-          <div class="mew-editorial-page__mast">Ferdinando Sarmi</div>
-          <nav class="mew-editorial-page__nav" aria-label="Invisible Cities archive">
-            <span>Archive</span>
-            <span class="mew-editorial-page__nav-group">
-              <span>Invisible,</span>
-              <span class="mew-editorial-page__nav-active">Cities</span>
-            </span>
-          </nav>
-        </header>
+        <div class="mew-editorial-page__mast">Ferdinando Sarmi</div>
         <div class="mew-editorial-page__folio">Atelier / Scroll</div>
-        <div class="mew-editorial-page__list">
-          <article class="mew-editorial-page__row">
-            <span>Trieste</span>
-            <span>Italian Origin</span>
-            <span>1912</span>
-            <span>Birth</span>
-          </article>
-          <article class="mew-editorial-page__row">
-            <span>Arden</span>
-            <span>Head Designer</span>
-            <span>1951</span>
-            <span>Salon</span>
-          </article>
-          <article class="mew-editorial-page__row">
-            <span>Seventh</span>
-            <span>Sarmi House</span>
-            <span>1959</span>
-            <span>New York</span>
-          </article>
-        </div>
         <p class="mew-editorial-page__copy mew-editorial-page__copy--left">
           Italian born, New York made. Sarmi built evening clothes around color, embroidery, and theatrical fabric light.
         </p>
