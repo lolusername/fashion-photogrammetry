@@ -305,9 +305,9 @@ const PHOTO_PRINT_IMAGE_URLS = [
   '/editorial/sarmi-web-98.jpg',
 ];
 const PHOTO_PRINT_CARD_WIDTH = 0.68;
-const PHOTO_PRINT_CARD_HEIGHT = 0.48;
-const PHOTO_PRINT_IMAGE_WIDTH = 0.58;
-const PHOTO_PRINT_IMAGE_HEIGHT = 0.326;
+const PHOTO_PRINT_CARD_HEIGHT = 0.398;
+const PHOTO_PRINT_IMAGE_WIDTH = 0.644;
+const PHOTO_PRINT_IMAGE_HEIGHT = 0.362;
 const PHOTO_PRINT_SPAWN_Z = 1.22;
 const PHOTO_PRINT_FLOOR_Y = 0.24;
 const PHOTO_PRINT_SURFACE_TILT = -1.12;
@@ -315,7 +315,7 @@ const PHOTO_PRINT_GRAVITY = 1.42;
 const PHOTO_PRINT_MAX_ACTIVE = 3;
 const PHOTO_PRINT_BURST_INTERVAL = 0.34;
 const PHOTO_PRINT_MIN_POINTER_DISTANCE = 0.085;
-const PHOTO_PRINT_DRESS_CLEARANCE_NDC = 0.045;
+const PHOTO_PRINT_DRESS_CLEARANCE_NDC = 0.012;
 const FULL_DRESS_CACHE_LIMIT = 2;
 const FULL_DRESS_FADE_SPEED = 6.5;
 const MOBILE_GHOST_LIMIT = 2;
@@ -817,11 +817,41 @@ const mewTitleOverlayTexture = new THREE.CanvasTexture(mewTitleOverlayCanvas);
 mewTitleOverlayTexture.colorSpace = THREE.SRGBColorSpace;
 mewTitleOverlayTexture.minFilter = THREE.LinearFilter;
 mewTitleOverlayTexture.magFilter = THREE.LinearFilter;
+const mewBackgroundCanvasTexture = new THREE.CanvasTexture(canvasElement);
+mewBackgroundCanvasTexture.minFilter = THREE.LinearFilter;
+mewBackgroundCanvasTexture.magFilter = THREE.LinearFilter;
+mewBackgroundCanvasTexture.generateMipmaps = false;
 const mewTitleOverlayScene = new THREE.Scene();
 const mewTitleOverlayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const mewTitleOverlayGeometry = new THREE.PlaneGeometry(2, 2);
-const mewTitleOverlayMaterial = new THREE.MeshBasicMaterial({
-  map: mewTitleOverlayTexture,
+const mewTitleOverlayMaterial = new THREE.ShaderMaterial({
+  uniforms: {
+    uBackground: { value: mewBackgroundCanvasTexture },
+    uMask: { value: mewTitleOverlayTexture },
+    uBlackOpacity: { value: 1 },
+  },
+  vertexShader: `
+    varying vec2 vUv;
+
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform sampler2D uBackground;
+    uniform sampler2D uMask;
+    uniform float uBlackOpacity;
+    varying vec2 vUv;
+
+    void main() {
+      vec4 mask = texture2D(uMask, vUv);
+      vec2 backgroundUv = vec2(vUv.x, clamp(vUv.y - 0.18, 0.0, 1.0));
+      vec3 backgroundColor = texture2D(uBackground, backgroundUv).rgb;
+      vec3 titleColor = mix(backgroundColor, vec3(0.043), uBlackOpacity);
+      gl_FragColor = vec4(titleColor, mask.a);
+    }
+  `,
   transparent: true,
   depthTest: false,
   depthWrite: false,
@@ -839,6 +869,7 @@ let mewTitleBlackOpacity = THREE.MathUtils.clamp(
   0,
   100,
 ) / 100;
+mewTitleOverlayMaterial.uniforms.uBlackOpacity.value = mewTitleBlackOpacity;
 let windController: DressWindController | null = null;
 let armBloomController: ArmBloomController | null = null;
 let disposed = false;
@@ -1470,6 +1501,9 @@ function renderMewForeground() {
   scene.environment = mewForegroundEnvironment;
 
   try {
+    if (mewTitleBlackOpacity < 0.999) {
+      mewBackgroundCanvasTexture.needsUpdate = true;
+    }
     mewForegroundRenderer.setRenderTarget(null);
     mewForegroundRenderer.autoClear = true;
     mewForegroundRenderer.clear(true, true, true);
@@ -3542,7 +3576,7 @@ function initializePhotoPrintBursts(targetScene: THREE.Scene) {
   photoPrintCardGeometry = trackGeometry(new THREE.PlaneGeometry(PHOTO_PRINT_CARD_WIDTH, PHOTO_PRINT_CARD_HEIGHT));
   photoPrintImageGeometry = trackGeometry(new THREE.PlaneGeometry(PHOTO_PRINT_IMAGE_WIDTH, PHOTO_PRINT_IMAGE_HEIGHT));
   photoPrintShadowGeometry = trackGeometry(
-    new THREE.PlaneGeometry(PHOTO_PRINT_CARD_WIDTH * 1.03, PHOTO_PRINT_CARD_HEIGHT * 1.04),
+    new THREE.PlaneGeometry(PHOTO_PRINT_CARD_WIDTH * 1.015, PHOTO_PRINT_CARD_HEIGHT * 1.015),
   );
   PHOTO_PRINT_IMAGE_URLS.forEach((url) => {
     photoPrintTextures.push(loadPhotoPrintTexture(url));
@@ -3630,7 +3664,7 @@ function getPhotoPrintSpawnPosition(x: number, y: number, target: THREE.Vector3)
   const visibleHalfWidth = visibleHalfHeight * camera.aspect;
   target.x = THREE.MathUtils.clamp(target.x, -visibleHalfWidth * 0.86, visibleHalfWidth * 0.86);
   photoPrintProjectionPoint.copy(target).project(camera);
-  const desiredScreenX = x < 0.5 ? -0.8 : 0.8;
+  const desiredScreenX = x < 0.5 ? -0.66 : 0.66;
   target.x += (desiredScreenX - photoPrintProjectionPoint.x) * visibleHalfWidth;
   target.y = THREE.MathUtils.clamp(target.y, 0.72, 3.38);
   target.z = PHOTO_PRINT_SPAWN_Z;
@@ -3645,10 +3679,10 @@ function spawnPhotoPrint(position: THREE.Vector3, movementX: number, movementY: 
   const root = new THREE.Group();
   const seed = Math.random() * Math.PI * 2;
   const baseScale = canvasElement.clientWidth < 420
-    ? randomBetween(0.42, 0.58)
+    ? randomBetween(0.46, 0.68)
     : isMobileViewport()
-    ? randomBetween(0.54, 0.72)
-    : randomBetween(0.78, 1.02);
+    ? randomBetween(0.58, 0.84)
+    : randomBetween(0.72, 1);
   const windLength = Math.max(0.001, Math.hypot(movementX, movementY));
   const windDirX = movementX / windLength;
   const windDirY = movementY / windLength;
@@ -3665,7 +3699,7 @@ function spawnPhotoPrint(position: THREE.Vector3, movementX: number, movementY: 
   root.renderOrder = 3;
 
   const shadowMaterial = new THREE.MeshBasicMaterial({
-    color: 0x2b2118,
+    color: 0x111111,
     transparent: true,
     opacity: 0,
     side: THREE.DoubleSide,
@@ -3673,7 +3707,7 @@ function spawnPhotoPrint(position: THREE.Vector3, movementX: number, movementY: 
     toneMapped: false,
   });
   const cardMaterial = new THREE.MeshBasicMaterial({
-    color: 0xf7ead5,
+    color: 0xffffff,
     transparent: true,
     opacity: 0,
     side: THREE.DoubleSide,
@@ -3691,12 +3725,12 @@ function spawnPhotoPrint(position: THREE.Vector3, movementX: number, movementY: 
   });
 
   const shadow = new THREE.Mesh(photoPrintShadowGeometry, shadowMaterial);
-  shadow.position.set(0.028, -0.032, -0.012);
+  shadow.position.set(0.014, -0.016, -0.012);
   shadow.renderOrder = 2;
   const card = new THREE.Mesh(photoPrintCardGeometry, cardMaterial);
   card.renderOrder = 3;
   const image = new THREE.Mesh(photoPrintImageGeometry, imageMaterial);
-  image.position.set(0, 0.047, 0.01);
+  image.position.set(0, 0, 0.01);
   image.renderOrder = 4;
   root.add(shadow, card, image);
   photoPrintGroup.add(root);
@@ -3732,8 +3766,8 @@ function spawnPhotoPrint(position: THREE.Vector3, movementX: number, movementY: 
     baseScale,
     seed,
     materials: [
-      { material: shadowMaterial, opacity: 0.2 },
-      { material: cardMaterial, opacity: 0.96 },
+      { material: shadowMaterial, opacity: 0.12 },
+      { material: cardMaterial, opacity: 1 },
       { material: imageMaterial, opacity: 0.98 },
     ],
   });
@@ -4490,7 +4524,7 @@ function handleMewTitleOpacityInput(event: Event) {
   const input = event.currentTarget as HTMLInputElement;
   const percent = THREE.MathUtils.clamp(Number(input.value), 0, 100);
   mewTitleBlackOpacity = percent / 100;
-  updateMewTitleOverlayTexture();
+  mewTitleOverlayMaterial.uniforms.uBlackOpacity.value = mewTitleBlackOpacity;
   if (mewTitleOpacityValue) {
     mewTitleOpacityValue.value = `${Math.round(percent)}%`;
   }
@@ -4968,7 +5002,7 @@ function updateMewTitleOverlayTexture() {
   mewTitleOverlayContext.save();
   mewTitleOverlayContext.translate(x, baseline);
   mewTitleOverlayContext.scale(targetWidth / measuredWidth, 1);
-  mewTitleOverlayContext.globalAlpha = mewTitleBlackOpacity;
+  mewTitleOverlayContext.globalAlpha = 1;
   mewTitleOverlayContext.fillStyle = '#0b0b0b';
   mewTitleOverlayContext.fillText(text, 0, 0);
   mewTitleOverlayContext.restore();
@@ -5552,6 +5586,7 @@ function dispose() {
   sharpSubjectOverlayMaterial.dispose();
   sharpSubjectOverlayGeometry.dispose();
   mewTitleOverlayTexture.dispose();
+  mewBackgroundCanvasTexture.dispose();
   mewTitleOverlayMaterial.dispose();
   mewTitleOverlayGeometry.dispose();
   signalGraphNodeRecords.forEach((record) => record.renderer.dispose());
