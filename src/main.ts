@@ -155,9 +155,9 @@ type PhotoPrintParticle = {
   angularVelocity: THREE.Vector3;
   restQuaternion: THREE.Quaternion;
   age: number;
-  lifespan: number;
   floorY: number;
   floorContactAge: number | null;
+  discarding: boolean;
   baseScale: number;
   seed: number;
   materials: PhotoPrintMaterialRecord[];
@@ -330,7 +330,8 @@ const PHOTO_PRINT_SPAWN_Z = 1.22;
 const PHOTO_PRINT_FLOOR_Y = 0.24;
 const PHOTO_PRINT_SURFACE_TILT = -1.12;
 const PHOTO_PRINT_GRAVITY = 1.42;
-const PHOTO_PRINT_MAX_ACTIVE = 3;
+const PHOTO_PRINT_LAYER_GAP = 0.0008;
+const PHOTO_PRINT_DISCARD_Y = -1.35;
 const PHOTO_PRINT_BURST_INTERVAL = 0.34;
 const PHOTO_PRINT_MIN_POINTER_DISTANCE = 0.085;
 const PHOTO_PRINT_DRESS_CLEARANCE_NDC = 0.012;
@@ -670,9 +671,12 @@ let photoPrintGroup: THREE.Group | null = null;
 let photoPrintCardGeometry: THREE.PlaneGeometry | null = null;
 let photoPrintImageGeometry: THREE.PlaneGeometry | null = null;
 let photoPrintShadowGeometry: THREE.PlaneGeometry | null = null;
+let windArchiveDressShadow: THREE.Mesh | null = null;
+let dialecticHalftoneShadow: THREE.Mesh | null = null;
 const holoSculptureMotions: HoloSculptureMotion[] = [];
 const photoPrintParticles: PhotoPrintParticle[] = [];
 const photoPrintTextures: THREE.Texture[] = [];
+let photoPrintLayerCounter = 0;
 let contactShadow: THREE.Mesh | null = null;
 let contactShadowMaterial: THREE.ShaderMaterial | null = null;
 let paperRollMaterial: THREE.MeshStandardMaterial | null = null;
@@ -1269,8 +1273,13 @@ function activateFullDress(record: FullDressRecord) {
   windController = null;
   armBloomController = null;
 
-  if (previous && contactShadow?.parent === previous.pivot) {
-    previous.pivot.remove(contactShadow);
+  if (previous) {
+    if (contactShadow?.parent === previous.pivot) {
+      previous.pivot.remove(contactShadow);
+    }
+    if (dialecticHalftoneShadow?.parent === previous.pivot) {
+      previous.pivot.remove(dialecticHalftoneShadow);
+    }
     fadeOutFullDress(previous);
   }
 
@@ -1285,6 +1294,9 @@ function activateFullDress(record: FullDressRecord) {
 
   if (contactShadow) {
     record.pivot.add(contactShadow);
+  }
+  if (dialecticHalftoneShadow) {
+    record.pivot.add(dialecticHalftoneShadow);
   }
 
   resetDressWind();
@@ -1342,6 +1354,8 @@ function renderDressTransitionFx(delta: number): boolean {
     holoAccentGroup,
     ivorySculptureGroup,
     photoPrintGroup,
+    windArchiveDressShadow,
+    dialecticHalftoneShadow,
     signalBlackGroup,
     yellowBacking,
     paperRollMesh,
@@ -1577,7 +1591,7 @@ function getVisibleSubjectObjects() {
 
 function renderMewForeground(delta: number) {
   const hiddenObjects: THREE.Object3D[] = [];
-  [cycloramaMesh, infiniteBackdropMesh, holoAccentGroup, ivorySculptureGroup, photoPrintGroup, yellowBacking, paperRollMesh].forEach((object) => {
+  [cycloramaMesh, infiniteBackdropMesh, holoAccentGroup, ivorySculptureGroup, photoPrintGroup, windArchiveDressShadow, dialecticHalftoneShadow, yellowBacking, paperRollMesh].forEach((object) => {
     if (object) {
       hiddenObjects.push(object);
     }
@@ -1619,7 +1633,7 @@ function renderSharpSubjectOverlay(
   options: { direct?: boolean; hideGhosts?: boolean } = {},
 ) {
   const hiddenObjects: THREE.Object3D[] = [];
-  [cycloramaMesh, infiniteBackdropMesh, holoAccentGroup, ivorySculptureGroup, photoPrintGroup, yellowBacking, paperRollMesh].forEach((object) => {
+  [cycloramaMesh, infiniteBackdropMesh, holoAccentGroup, ivorySculptureGroup, photoPrintGroup, windArchiveDressShadow, yellowBacking, paperRollMesh].forEach((object) => {
     if (object) {
       hiddenObjects.push(object);
     }
@@ -2857,6 +2871,30 @@ function addStudio(targetScene: THREE.Scene) {
   contactShadow.position.set(0, 0.014, 0.18);
   contactShadow.scale.set(1.35, 0.5, 1);
 
+  windArchiveDressShadow = new THREE.Mesh(
+    trackGeometry(new THREE.PlaneGeometry(1, 1, 1, 1)),
+    trackMaterial(createSoftContactShadowMaterial(0x3f332b, 0.38)),
+  );
+  windArchiveDressShadow.name = 'wind archive dress shadow';
+  windArchiveDressShadow.rotation.x = PHOTO_PRINT_SURFACE_TILT;
+  windArchiveDressShadow.position.set(0.16, PHOTO_PRINT_FLOOR_Y - 0.12, 0.24);
+  windArchiveDressShadow.scale.set(2.2, 1.25, 1);
+  windArchiveDressShadow.renderOrder = 1;
+  windArchiveDressShadow.visible = false;
+  targetScene.add(windArchiveDressShadow);
+
+  dialecticHalftoneShadow = new THREE.Mesh(
+    trackGeometry(new THREE.PlaneGeometry(1, 1, 1, 1)),
+    trackMaterial(createDialecticHalftoneShadowMaterial()),
+  );
+  dialecticHalftoneShadow.name = 'dialectic halftone floor shadow';
+  dialecticHalftoneShadow.rotation.x = PHOTO_PRINT_SURFACE_TILT;
+  dialecticHalftoneShadow.position.set(0.06, -0.27, 0.68);
+  dialecticHalftoneShadow.scale.set(2, 1.3, 1);
+  dialecticHalftoneShadow.renderOrder = 1;
+  dialecticHalftoneShadow.visible = false;
+  targetScene.add(dialecticHalftoneShadow);
+
   paperRollMaterial = trackMaterial(
     new THREE.MeshStandardMaterial({
       color: 0x6f8799,
@@ -3680,7 +3718,7 @@ function updateMewHoloSculptures(time: number, delta: number) {
 
 function initializePhotoPrintBursts(targetScene: THREE.Scene) {
   photoPrintGroup = new THREE.Group();
-  photoPrintGroup.name = 'invisible cities cursor photo prints';
+  photoPrintGroup.name = 'wind archive falling photo prints';
   photoPrintGroup.visible = cycloramaBackgroundSettings.preset === 'tabla-rasa';
   targetScene.add(photoPrintGroup);
 
@@ -3735,10 +3773,6 @@ function maybeSpawnPhotoPrintBurst(
   getPhotoPrintSpawnPosition(x, y, photoPrintSpawnPosition);
   spawnPhotoPrint(photoPrintSpawnPosition, movementX, movementY);
 
-  while (photoPrintParticles.length > PHOTO_PRINT_MAX_ACTIVE) {
-    removePhotoPrintParticle(0);
-  }
-
   lastPhotoPrintBurstPoint.set(x, y);
   lastPhotoPrintBurstTime = now;
 }
@@ -3789,6 +3823,8 @@ function spawnPhotoPrint(position: THREE.Vector3, movementX: number, movementY: 
   const texture = photoPrintTextures[Math.floor(Math.random() * photoPrintTextures.length)];
   const root = new THREE.Group();
   const seed = Math.random() * Math.PI * 2;
+  const layer = photoPrintLayerCounter++;
+  const layerRenderOrder = 10 + layer * 3;
   const baseScale = canvasElement.clientWidth < 420
     ? randomBetween(0.46, 0.68)
     : isMobileViewport()
@@ -3807,7 +3843,7 @@ function spawnPhotoPrint(position: THREE.Vector3, movementX: number, movementY: 
     windHeading + randomBetween(-0.72, 0.72),
   );
   root.scale.setScalar(baseScale);
-  root.renderOrder = 3;
+  root.renderOrder = layerRenderOrder;
 
   const shadowMaterial = new THREE.MeshBasicMaterial({
     color: 0x111111,
@@ -3837,25 +3873,26 @@ function spawnPhotoPrint(position: THREE.Vector3, movementX: number, movementY: 
 
   const shadow = new THREE.Mesh(photoPrintShadowGeometry, shadowMaterial);
   shadow.position.set(0.014, -0.016, -0.012);
-  shadow.renderOrder = 2;
+  shadow.renderOrder = layerRenderOrder;
   const card = new THREE.Mesh(photoPrintCardGeometry, cardMaterial);
-  card.renderOrder = 3;
+  card.renderOrder = layerRenderOrder + 1;
   const image = new THREE.Mesh(photoPrintImageGeometry, imageMaterial);
   image.position.set(0, 0, 0.01);
-  image.renderOrder = 4;
+  image.renderOrder = layerRenderOrder + 2;
   root.add(shadow, card, image);
   photoPrintGroup.add(root);
 
   const windX = clampSigned(movementX * 0.064, 1.45);
   const windY = clampSigned(movementY * 0.058, 0.94);
   const lift = randomBetween(0.36, 0.72) + Math.max(0, windY * 0.18);
-  const restQuaternion = new THREE.Quaternion().setFromEuler(
-    new THREE.Euler(
-      PHOTO_PRINT_SURFACE_TILT + randomBetween(-0.035, 0.035),
-      randomBetween(-0.035, 0.035),
-      windHeading + randomBetween(-0.5, 0.5),
-    ),
-  );
+  const restQuaternion = new THREE.Quaternion()
+    .setFromAxisAngle(new THREE.Vector3(1, 0, 0), PHOTO_PRINT_SURFACE_TILT)
+    .multiply(
+      new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(0, 0, 1),
+        windHeading + randomBetween(-0.5, 0.5),
+      ),
+    );
 
   photoPrintParticles.push({
     root,
@@ -3871,9 +3908,9 @@ function spawnPhotoPrint(position: THREE.Vector3, movementX: number, movementY: 
     ),
     restQuaternion,
     age: 0,
-    lifespan: randomBetween(8.2, 10.8),
-    floorY: PHOTO_PRINT_FLOOR_Y + randomBetween(0, 0.025),
+    floorY: PHOTO_PRINT_FLOOR_Y + layer * PHOTO_PRINT_LAYER_GAP,
     floorContactAge: null,
+    discarding: false,
     baseScale,
     seed,
     materials: [
@@ -3887,7 +3924,6 @@ function spawnPhotoPrint(position: THREE.Vector3, movementX: number, movementY: 
 
 function updatePhotoPrintParticles(delta: number) {
   if (!isPhotoPrintTheme()) {
-    clearPhotoPrintParticles();
     return;
   }
 
@@ -3902,44 +3938,53 @@ function updatePhotoPrintParticles(delta: number) {
     particle.age += delta;
 
     const floorSettled = particle.floorContactAge !== null;
-    particle.velocity.x += (
-      pointerWind.wind.x * (floorSettled ? 0.035 : 0.26)
-      + Math.sin(shaderTime * 4.8 + particle.seed) * (floorSettled ? 0.012 : 0.07)
-    ) * delta;
-    particle.velocity.z += (
-      pointerWind.wind.z * (floorSettled ? 0.02 : 0.18)
-      + Math.cos(shaderTime * 3.9 + particle.seed) * (floorSettled ? 0.006 : 0.035)
-    ) * delta;
-
-    if (!floorSettled || particle.velocity.y > 0) {
-      particle.velocity.y += (pointerWind.wind.y * 0.08 - PHOTO_PRINT_GRAVITY) * delta;
-    }
-
-    particle.root.position.addScaledVector(particle.velocity, delta);
-
-    if (particle.root.position.y <= particle.floorY) {
-      particle.root.position.y = particle.floorY;
-      if (particle.floorContactAge === null) {
-        particle.floorContactAge = 0;
-      }
-      if (particle.velocity.y < 0) {
-        particle.velocity.y = 0;
-      }
-    }
-
-    if (particle.floorContactAge !== null) {
-      particle.floorContactAge += delta;
-      const floorFriction = Math.exp(-delta * 5.8);
-      particle.velocity.x *= floorFriction;
-      particle.velocity.z *= floorFriction;
-      particle.velocity.y = 0;
-      particle.angularVelocity.multiplyScalar(Math.exp(-delta * 4.8));
-      particle.root.quaternion.slerp(particle.restQuaternion, 1 - Math.exp(-delta * 7.2));
-    } else {
-      particle.velocity.multiplyScalar(Math.exp(-delta * 0.08));
+    if (particle.discarding) {
+      particle.velocity.y -= PHOTO_PRINT_GRAVITY * delta;
+      particle.root.position.addScaledVector(particle.velocity, delta);
       particle.root.rotation.x += particle.angularVelocity.x * delta;
       particle.root.rotation.y += particle.angularVelocity.y * delta;
       particle.root.rotation.z += particle.angularVelocity.z * delta;
+    } else {
+      particle.velocity.x += (
+        pointerWind.wind.x * (floorSettled ? 0.035 : 0.26)
+        + Math.sin(shaderTime * 4.8 + particle.seed) * (floorSettled ? 0.012 : 0.07)
+      ) * delta;
+      particle.velocity.z += (
+        pointerWind.wind.z * (floorSettled ? 0.02 : 0.18)
+        + Math.cos(shaderTime * 3.9 + particle.seed) * (floorSettled ? 0.006 : 0.035)
+      ) * delta;
+
+      if (!floorSettled || particle.velocity.y > 0) {
+        particle.velocity.y += (pointerWind.wind.y * 0.08 - PHOTO_PRINT_GRAVITY) * delta;
+      }
+
+      particle.root.position.addScaledVector(particle.velocity, delta);
+
+      if (particle.root.position.y <= particle.floorY) {
+        particle.root.position.y = particle.floorY;
+        if (particle.floorContactAge === null) {
+          particle.floorContactAge = 0;
+        }
+        if (particle.velocity.y < 0) {
+          particle.velocity.y = 0;
+        }
+      }
+
+      if (particle.floorContactAge !== null) {
+        particle.floorContactAge += delta;
+        const floorFriction = Math.exp(-delta * 5.8);
+        particle.velocity.x *= floorFriction;
+        particle.velocity.z *= floorFriction;
+        particle.velocity.y = 0;
+        particle.root.position.y = particle.floorY;
+        particle.angularVelocity.multiplyScalar(Math.exp(-delta * 4.8));
+        particle.root.quaternion.slerp(particle.restQuaternion, 1 - Math.exp(-delta * 7.2));
+      } else {
+        particle.velocity.multiplyScalar(Math.exp(-delta * 0.08));
+        particle.root.rotation.x += particle.angularVelocity.x * delta;
+        particle.root.rotation.y += particle.angularVelocity.y * delta;
+        particle.root.rotation.z += particle.angularVelocity.z * delta;
+      }
     }
 
     const fadeIn = clamp01(particle.age / 0.16);
@@ -3952,15 +3997,44 @@ function updatePhotoPrintParticles(delta: number) {
 
     const overlapsDress = hasProtectedDressArea
       && doesPhotoPrintOverlapScreenBounds(particle.root, photoPrintDressScreenBounds);
+
+    if (overlapsDress && !particle.discarding) {
+      const outwardDirection = particle.root.position.x >= 0 ? 1 : -1;
+      particle.discarding = true;
+      particle.floorContactAge = null;
+      particle.velocity.set(
+        outwardDirection * randomBetween(0.48, 0.82),
+        randomBetween(-0.82, -0.56),
+        randomBetween(-0.08, 0.12),
+      );
+      particle.angularVelocity.set(
+        randomBetween(-1.8, 1.8),
+        randomBetween(-1.4, 1.4),
+        outwardDirection * randomBetween(0.8, 1.8),
+      );
+    }
+
     particle.root.visible = !overlapsDress;
 
-    const restingTimeElapsed = particle.floorContactAge !== null && particle.floorContactAge >= 4.2;
-    if (restingTimeElapsed || particle.age >= particle.lifespan) {
-      removePhotoPrintParticle(index);
+    if (particle.discarding) {
+      photoPrintProjectionPoint.copy(particle.root.position).project(camera);
+      const outsideViewport = (
+        Math.abs(photoPrintProjectionPoint.x) > 1.4
+        || photoPrintProjectionPoint.y < -1.35
+      );
+      if (particle.root.position.y < PHOTO_PRINT_DISCARD_Y || outsideViewport) {
+        removePhotoPrintParticle(index);
+      }
     }
   }
   stageElement!.dataset.photoPrintVisible = String(
     photoPrintParticles.filter((particle) => particle.root.visible).length,
+  );
+  stageElement!.dataset.photoPrintSettled = String(
+    photoPrintParticles.filter((particle) => particle.floorContactAge !== null).length,
+  );
+  stageElement!.dataset.photoPrintDiscarding = String(
+    photoPrintParticles.filter((particle) => particle.discarding).length,
   );
 }
 
@@ -4053,8 +4127,11 @@ function clearPhotoPrintParticles() {
   for (let index = photoPrintParticles.length - 1; index >= 0; index -= 1) {
     removePhotoPrintParticle(index);
   }
+  photoPrintLayerCounter = 0;
   lastPhotoPrintBurstTime = Number.NEGATIVE_INFINITY;
   lastPhotoPrintBurstPoint.set(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
+  stageElement!.dataset.photoPrintSettled = '0';
+  stageElement!.dataset.photoPrintDiscarding = '0';
 }
 
 function isPhotoPrintTheme() {
@@ -4354,6 +4431,52 @@ function createSoftContactShadowMaterial(color: number, opacity: number) {
   });
 }
 
+function createDialecticHalftoneShadowMaterial() {
+  return new THREE.ShaderMaterial({
+    vertexShader: `
+      varying vec2 vUv;
+
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      varying vec2 vUv;
+
+      float hash(vec2 value) {
+        return fract(sin(dot(value, vec2(127.1, 311.7))) * 43758.5453123);
+      }
+
+      void main() {
+        vec2 p = vUv * 2.0 - 1.0;
+        float broadDistance = length(vec2((p.x + 0.04) * 1.04, (p.y + 0.12) * 0.9));
+        float contactDistance = length(vec2((p.x - 0.08) * 1.4, (p.y - 0.92) * 2.0));
+        float broad = 1.0 - smoothstep(0.5, 1.0, broadDistance);
+        float contact = 1.0 - smoothstep(0.1, 0.54, contactDistance);
+        float density = clamp(broad * 0.68 + contact * 0.62, 0.0, 1.0);
+
+        vec2 gridScale = vec2(39.0, 22.0);
+        vec2 grid = floor(vUv * gridScale);
+        vec2 cell = abs(fract(vUv * gridScale) - 0.5);
+        float variation = hash(grid);
+        float squareSize = mix(0.015, 0.4, density) * mix(0.9, 1.06, variation);
+
+        if (density < 0.05 || max(cell.x, cell.y) > squareSize) {
+          discard;
+        }
+
+        gl_FragColor = vec4(vec3(0.025, 0.055, 0.075), mix(0.22, 0.56, density));
+      }
+    `,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    toneMapped: false,
+  });
+}
+
 function createTechnicolorYellowPlaneMaterial(color: number) {
   const material = new THREE.MeshBasicMaterial({
     color,
@@ -4414,9 +4537,6 @@ function applyCycloramaBackgroundPreset(presetId: CycloramaBackgroundPresetId) {
 
   if (photoPrintGroup) {
     photoPrintGroup.visible = presetId === 'tabla-rasa';
-    if (presetId !== 'tabla-rasa') {
-      clearPhotoPrintParticles();
-    }
   }
 
   if (ivorySculptureGroup) {
@@ -4531,6 +4651,14 @@ function updateThemeObjectVisibility() {
 
   if (contactShadow) {
     contactShadow.visible = physicalCyclorama;
+  }
+
+  if (windArchiveDressShadow) {
+    windArchiveDressShadow.visible = photoPrintTheme;
+  }
+
+  if (dialecticHalftoneShadow) {
+    dialecticHalftoneShadow.visible = cycloramaBackgroundSettings.preset === 'blue';
   }
 
   if (holoAccentGroup) {

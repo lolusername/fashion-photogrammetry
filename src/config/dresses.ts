@@ -25,7 +25,7 @@ export const DRESS_ASSETS: Record<DressAssetId, DressAsset> = {
     label: 'Dress 1',
     url: '/dress.glb',
     swatch: 'linear-gradient(135deg, #7a624c, #eee2cc)',
-    dialecticScale: 0.85,
+    dialecticScale: 1,
     ghost: {
       position: [-1.58, 0, -0.5],
       rotationY: 0.22,
