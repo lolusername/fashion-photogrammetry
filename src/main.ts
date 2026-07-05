@@ -250,6 +250,7 @@ const ivoryPortalElement = app.querySelector<HTMLDivElement>('.ivory-portal');
 const signalDiptychElement = app.querySelector<HTMLDivElement>('.signal-diptych');
 const loadingOverlayElement = sceneShell.loadingOverlay;
 const loadingDetailElement = sceneShell.loadingDetail;
+const dialecticPaperToggle = app.querySelector<HTMLButtonElement>('[data-dialectic-paper-toggle]');
 
 const statusElement = status;
 const canvasElement = canvas;
@@ -884,6 +885,7 @@ const subjectMotion: SubjectMotionState = {
 let gui: GUI | null = null;
 let queuedResizeFrame = 0;
 let editorialRailRevealTimeout = 0;
+let dialecticPaperTextureEnabled = false;
 
 initializeDressThumbnails();
 applyCycloramaBackgroundPreset(cycloramaBackgroundSettings.preset);
@@ -4123,7 +4125,7 @@ function applyCycloramaBackgroundPreset(presetId: CycloramaBackgroundPresetId) {
   cycloramaBackgroundSettings.preset = presetId;
   stageElement!.dataset.backgroundPreset = presetId;
   syncCycloramaBackgroundUniforms();
-  infiniteBackdropUniforms.uBackdropMode.value = INFINITE_BACKDROP_MODE_VALUES[presetId];
+  syncInfiniteBackdropMode();
 
   if (cycloramaMesh && cycloramaMaterial && cycloramaHoloMaterial) {
     cycloramaMesh.material = useIvoryHolo ? cycloramaHoloMaterial : cycloramaMaterial;
@@ -4200,6 +4202,34 @@ function applyCycloramaBackgroundPreset(presetId: CycloramaBackgroundPresetId) {
   renderDressThumbnails();
   updateCycloramaBackgroundButtons();
   buildSignalDiptych();
+}
+
+function syncInfiniteBackdropMode() {
+  const dialecticPaperActive = (
+    cycloramaBackgroundSettings.preset === 'blue'
+    && dialecticPaperTextureEnabled
+  );
+  infiniteBackdropUniforms.uBackdropMode.value = dialecticPaperActive
+    ? INFINITE_BACKDROP_MODE_VALUES['tabla-rasa']
+    : INFINITE_BACKDROP_MODE_VALUES[cycloramaBackgroundSettings.preset];
+  stageElement.dataset.dialecticSurface = dialecticPaperActive ? 'paper' : 'blue';
+
+  if (dialecticPaperToggle) {
+    dialecticPaperToggle.setAttribute('aria-pressed', String(dialecticPaperTextureEnabled));
+    dialecticPaperToggle.setAttribute(
+      'aria-label',
+      dialecticPaperTextureEnabled ? 'Restore the blue background' : 'Show the paper background',
+    );
+  }
+}
+
+function handleDialecticPaperToggle() {
+  if (cycloramaBackgroundSettings.preset !== 'blue') {
+    return;
+  }
+
+  dialecticPaperTextureEnabled = !dialecticPaperTextureEnabled;
+  syncInfiniteBackdropMode();
 }
 
 function updateThemeObjectVisibility() {
@@ -5242,6 +5272,7 @@ canvasElement.addEventListener('pointerleave', handlePointerLeave, { passive: tr
 backgroundButtons.forEach((button) => button.addEventListener('click', handleCycloramaBackgroundClick));
 dressButtons.forEach((button) => button.addEventListener('click', handleDressAssetClick));
 dressNavigationButtons.forEach((button) => button.addEventListener('click', handleDressNavigationClick));
+dialecticPaperToggle?.addEventListener('click', handleDialecticPaperToggle);
 if (signalDiptychElement) {
   signalDiptychElement.addEventListener('click', handleSignalNodeClick);
   signalDiptychElement.addEventListener('keydown', handleSignalNodeKeydown);
@@ -5282,6 +5313,7 @@ function dispose() {
   backgroundButtons.forEach((button) => button.removeEventListener('click', handleCycloramaBackgroundClick));
   dressButtons.forEach((button) => button.removeEventListener('click', handleDressAssetClick));
   dressNavigationButtons.forEach((button) => button.removeEventListener('click', handleDressNavigationClick));
+  dialecticPaperToggle?.removeEventListener('click', handleDialecticPaperToggle);
   if (signalDiptychElement) {
     signalDiptychElement.removeEventListener('click', handleSignalNodeClick);
     signalDiptychElement.removeEventListener('keydown', handleSignalNodeKeydown);

@@ -72,9 +72,8 @@ select {
   z-index: 3;
   display: none;
   overflow: hidden;
-  color: rgba(25, 20, 18, 0.46);
-  font-family: Didot, "Bodoni 72", "Bodoni 72 Smallcaps", Georgia, serif;
-  letter-spacing: 0;
+  color: rgba(10, 10, 10, 0.86);
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
   pointer-events: none;
 }
 
@@ -84,37 +83,47 @@ select {
 
 .mew-editorial-page__mast {
   position: absolute;
-  top: clamp(18px, 3.6vh, 48px);
-  left: 50%;
-  width: min(88%, 1680px);
-  transform: translateX(-50%);
-  color: rgba(17, 17, 17, 0.78);
-  font-size: clamp(38px, 6.15vw, 124px);
+  top: clamp(16px, 2.8vh, 34px);
+  left: max(3vw, 20px);
+  width: min(68%, 1040px);
+  color: #0b0b0b;
+  font-size: clamp(62px, 9.5vw, 156px);
   font-weight: 400;
-  line-height: 0.82;
-  text-transform: uppercase;
+  line-height: 0.7;
+  letter-spacing: -0.072em;
+}
+
+.mew-editorial-page__mast span {
+  display: block;
+}
+
+.mew-editorial-page__mast span:last-child {
+  margin-top: 0.08em;
+  margin-left: 31%;
 }
 
 .mew-editorial-page__folio {
   position: absolute;
-  top: clamp(24px, 4.4vh, 54px);
-  right: max(5.5vw, 22px);
-  color: rgba(18, 14, 13, 0.58);
-  font-size: clamp(11px, 1.1vw, 17px);
-  font-style: italic;
+  top: clamp(24px, 4vh, 46px);
+  right: max(3vw, 20px);
+  color: rgba(10, 10, 10, 0.72);
+  font-size: clamp(8px, 0.68vw, 11px);
+  font-weight: 700;
   line-height: 1;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .mew-editorial-page__copy {
   position: absolute;
-  width: min(21vw, 320px);
+  width: min(25vw, 360px);
   margin: 0;
-  color: rgba(18, 14, 13, 0.54);
-  font-size: clamp(12px, 1.05vw, 18px);
-  font-style: italic;
-  line-height: 1.42;
-  text-shadow: 0 0 18px rgba(255, 255, 255, 0.62);
+  color: rgba(10, 10, 10, 0.82);
+  font-size: clamp(11px, 0.86vw, 14px);
+  font-weight: 600;
+  line-height: 1.18;
+  letter-spacing: -0.018em;
+  text-shadow: 0 0 14px rgba(255, 255, 255, 0.72);
 }
 
 .mew-editorial-page__copy--left {
@@ -125,7 +134,7 @@ select {
 .mew-editorial-page__copy--right {
   right: max(3vw, 18px);
   bottom: clamp(122px, 17vh, 210px);
-  text-align: right;
+  text-align: left;
 }
 
 .blue-layout {
@@ -217,6 +226,32 @@ select {
   font-family: "Times New Roman", Times, serif;
   font-size: clamp(13px, 0.95vw, 17px);
   line-height: 1.5;
+}
+
+.blue-editorial-panel__paper-toggle {
+  display: inline;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  appearance: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-align: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.16em;
+  cursor: pointer;
+}
+
+.blue-editorial-panel__paper-toggle:hover {
+  text-decoration-thickness: 2px;
+}
+
+.blue-editorial-panel__paper-toggle:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 3px;
 }
 
 .dress-switcher {
@@ -555,27 +590,34 @@ select {
 
 @media (max-width: 720px) {
   .mew-editorial-page__mast {
-    top: 18px;
+    top: 16px;
+    left: 12px;
     width: calc(100% - 18px);
-    font-size: clamp(35px, 13vw, 72px);
+    font-size: clamp(44px, 14vw, 68px);
+    line-height: 0.72;
+    letter-spacing: -0.068em;
+  }
+
+  .mew-editorial-page__mast span:last-child {
+    margin-left: 27%;
   }
 
   .mew-editorial-page__folio {
-    top: 112px;
+    top: 110px;
     right: 16px;
     bottom: auto;
-    font-size: 10px;
+    font-size: 8px;
   }
 
   .mew-editorial-page__copy {
     display: block;
     width: min(39vw, 180px);
-    font-size: clamp(10px, 2.85vw, 13px);
-    line-height: 1.34;
+    font-size: clamp(9px, 2.6vw, 11px);
+    line-height: 1.2;
   }
 
   .mew-editorial-page__copy--left {
-    bottom: 160px;
+    bottom: 110px;
     left: 14px;
   }
 
@@ -612,8 +654,21 @@ select {
   }
 
   .blue-editorial-panel__list,
-  .blue-editorial-panel > p,
   .stage[data-background-preset="blue"] .blue-layout__divider {
+    display: none;
+  }
+
+  .blue-editorial-panel > p.blue-editorial-panel__copy {
+    display: block;
+    margin: 24px 0 0;
+    padding: 0;
+    border: 0;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 9px;
+    line-height: 1.25;
+  }
+
+  .blue-editorial-panel__copy > span {
     display: none;
   }
 

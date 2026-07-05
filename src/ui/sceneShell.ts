@@ -39,7 +39,10 @@ export function createSceneShell(options: SceneShellOptions): SceneShell {
   mount.innerHTML = `
     <main class="stage" data-background-preset="${initialThemeId}" aria-label="Ferdinando Sarmi dress study">
       <div class="mew-editorial-page" aria-hidden="true">
-        <div class="mew-editorial-page__mast">Ferdinando Sarmi</div>
+        <div class="mew-editorial-page__mast">
+          <span>Ferdinando</span>
+          <span>Sarmi</span>
+        </div>
         <div class="mew-editorial-page__folio">Atelier / Scroll</div>
         <p class="mew-editorial-page__copy mew-editorial-page__copy--left">
           Italian born, New York made. Sarmi built evening clothes around color, embroidery, and theatrical fabric light.
@@ -67,7 +70,7 @@ export function createSceneShell(options: SceneShellOptions): SceneShell {
         </p>
       </div>
       <div class="blue-layout">
-        <section class="blue-editorial-panel" aria-hidden="true">
+        <section class="blue-editorial-panel" aria-label="Dialectic dress archive">
           <header class="blue-editorial-panel__header">
             <span>Ferdinando Sarmi</span>
             <span>Dialectic / Dress archive</span>
@@ -79,8 +82,14 @@ export function createSceneShell(options: SceneShellOptions): SceneShell {
             <article><span>Coty</span><span>Fashion award</span><span>1960</span></article>
             <article><span>Surface</span><span>Silk / metallic</span><span>1966</span></article>
           </div>
-          <p>
-            Sarmi moved between European elegance and New York speed: evening dress, ready-to-wear, vivid silk, embroidery, and surfaces built for light.
+          <p class="blue-editorial-panel__copy">
+            <span>Sarmi moved between European elegance and New York speed: evening dress, ready-to-wear, vivid silk, embroidery, and </span><button
+              class="blue-editorial-panel__paper-toggle"
+              type="button"
+              data-dialectic-paper-toggle
+              aria-label="Show the paper background"
+              aria-pressed="false"
+            >surfaces built for light.</button>
           </p>
         </section>
         <div class="blue-layout__divider" aria-hidden="true"></div>
