@@ -2200,6 +2200,14 @@ function getDesiredGhostAssetIds(): DressAssetId[] {
     return DRESS_ASSET_ORDER;
   }
 
+  if (cycloramaBackgroundSettings.preset === 'tabla-rasa') {
+    const activeIndex = DRESS_ASSET_ORDER.indexOf(activeAssetId);
+    const nextAssetId = DRESS_ASSET_ORDER[
+      (Math.max(0, activeIndex) + 1) % DRESS_ASSET_ORDER.length
+    ];
+    return nextAssetId && nextAssetId !== activeAssetId ? [nextAssetId] : [];
+  }
+
   const inactiveIds = DRESS_ASSET_ORDER.filter((assetId) => assetId !== activeAssetId);
 
   if (!isMobileViewport()) {
@@ -2237,13 +2245,12 @@ function applyGhostLayout(record: GhostDressRecord, visibleOrderedIds: DressAsse
   const verticalOffset = (ghostIndex - centerOffset) * (portrait ? 0.28 : 0.34);
 
   if (windArchive) {
-    const side = record.asset.id === DRESS_ASSET_ORDER[0] ? -1 : 1;
     record.root.position.set(
-      side * (portrait ? 0.72 : 1.72),
+      portrait ? 0.72 : 1.72,
       portrait ? 0.2 : 0.38,
       portrait ? -0.9 : -0.82,
     );
-    record.root.rotation.y = side * -0.32;
+    record.root.rotation.y = -0.32;
     record.root.scale.setScalar(portrait ? 0.3 : 0.56);
 
     record.material.color.setHex(0x63737c);
