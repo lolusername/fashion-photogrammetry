@@ -5513,14 +5513,17 @@ function applyResponsiveCameraToCanvas() {
 
 function applyThemeSubjectPlacement() {
   const invisibleCities = cycloramaBackgroundSettings.preset === 'mew-holo';
-  const scale = invisibleCities
-    ? INVISIBLE_CITIES_SUBJECT_SCALE
-    : cycloramaBackgroundSettings.preset === 'tabla-rasa'
-    ? WIND_ARCHIVE_SUBJECT_SCALE
-    : 1;
+  const dialectic = cycloramaBackgroundSettings.preset === 'blue';
   const lift = invisibleCities ? (isMobileViewport() ? 0 : 0.42) : 0;
 
   fullDressCache.forEach((record) => {
+    const scale = invisibleCities
+      ? INVISIBLE_CITIES_SUBJECT_SCALE
+      : cycloramaBackgroundSettings.preset === 'tabla-rasa'
+      ? WIND_ARCHIVE_SUBJECT_SCALE
+      : dialectic
+      ? record.asset.dialecticScale
+      : 1;
     record.pivot.position.set(0, lift, 0);
     record.pivot.scale.setScalar(scale);
   });
