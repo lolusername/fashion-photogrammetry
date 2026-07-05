@@ -500,6 +500,8 @@ const MEW_ALPHA_FEATHER_SHADER = {
     tDiffuse: { value: null },
     uFeatherWidth: { value: 0.31 },
     uFeatherOpacity: { value: 1 },
+    uFeatherLift: { value: 0.72 },
+    uFeatherSaturation: { value: 0.46 },
   },
   vertexShader: `
     varying vec2 vUv;
@@ -513,6 +515,8 @@ const MEW_ALPHA_FEATHER_SHADER = {
     uniform sampler2D tDiffuse;
     uniform float uFeatherWidth;
     uniform float uFeatherOpacity;
+    uniform float uFeatherLift;
+    uniform float uFeatherSaturation;
     varying vec2 vUv;
 
     void main() {
@@ -528,9 +532,18 @@ const MEW_ALPHA_FEATHER_SHADER = {
         sin(vUv.y * 15.0 - vUv.x * 6.0) * 0.008;
       float noisyDistanceToEdge = distanceToEdge + edgeNoise;
       float mask = smoothstep(0.0, uFeatherWidth, noisyDistanceToEdge);
+      float featherBand = (1.0 - mask) * smoothstep(0.01, uFeatherWidth * 0.82, noisyDistanceToEdge);
 
-      // Alpha-only feather. Do not alter RGB here: color lifting/desaturation in
-      // the mask reads as a faint rectangular overlay on the holo backdrop.
+      // Keep the transparent feather luminous instead of gray: the RGB is lifted
+      // only inside the fading band, while alpha still dissolves to the page.
+      float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+      color.rgb = mix(vec3(luma), color.rgb, 1.0 + featherBand * uFeatherSaturation);
+      color.rgb = mix(
+        color.rgb,
+        min(color.rgb * (1.0 + featherBand * 0.38) + vec3(0.08, 0.045, 0.09) * featherBand, vec3(1.0)),
+        uFeatherLift
+      );
+
       color.a *= mix(1.0, mask, uFeatherOpacity);
       gl_FragColor = color;
     }
@@ -1268,24 +1281,28 @@ function animate(timestamp?: number) {
   const objectPostThemeActive = invisibleCitiesActive || ivoryThemeActive;
   const objectBlurAmount = invisibleCitiesActive ? 0.018 : ivoryThemeActive ? 0.038 : 0;
 
-  bloomPass.threshold = blueThemeActive || invisibleCitiesActive || ivoryThemeActive || signalThemeActive
+  bloomPass.threshold = invisibleCitiesActive
+    ? 0.88
+    : ivoryThemeActive
+    ? 0.82
+    : blueThemeActive || signalThemeActive
     ? 1.35
     : BLOOM_THRESHOLD;
   bloomPass.strength = blueThemeActive
     ? 0
     : ivoryThemeActive
-    ? 0.002
+    ? 0.018
     : invisibleCitiesActive
-    ? 0.004 + pointerWind.activity * 0.014
+    ? 0.07 * (1 + pointerWind.activity * 0.28)
     : signalThemeActive
     ? 0.01
     : BLOOM_BASE_STRENGTH + pointerWind.activity * BLOOM_WIND_STRENGTH;
   bloomPass.radius = blueThemeActive
     ? 0
     : ivoryThemeActive
-    ? 0.03
+    ? 0.06
     : invisibleCitiesActive
-    ? 0.04 + pointerWind.activity * 0.025
+    ? 0.08 + pointerWind.activity * 0.025
     : signalThemeActive
     ? 0.05
     : BLOOM_BASE_RADIUS + pointerWind.activity * BLOOM_WIND_RADIUS;
@@ -2619,26 +2636,32 @@ function createInfiniteBackdropMaterial() {
           cos((uv.x - uv.y) * 7.0 - uBackdropTime * 0.05)
         ) * 0.018;
 
-        vec3 cyan = vec3(0.35, 0.92, 1.0);
-        vec3 mint = vec3(0.43, 1.0, 0.28);
-        vec3 acid = vec3(0.88, 1.0, 0.12);
-        vec3 pink = vec3(1.0, 0.16, 0.68);
-        vec3 pearl = vec3(1.0, 0.86, 0.96);
-        vec3 violet = vec3(0.48, 0.34, 1.0);
+        vec3 cyan = vec3(0.28, 0.98, 1.0);
+        vec3 mint = vec3(0.42, 1.0, 0.36);
+        vec3 acid = vec3(1.0, 0.98, 0.1);
+        vec3 pink = vec3(1.0, 0.08, 0.76);
+        vec3 pearl = vec3(1.0, 0.9, 0.98);
+        vec3 violet = vec3(0.52, 0.32, 1.0);
 
         float mintPool = softBlob(warped, vec2(0.2, 0.26), vec2(0.75, 1.08), 0.64, 0.38);
         float pinkPool = softBlob(warped, vec2(0.72, 0.46), vec2(1.08, 0.78), 0.52, 0.34);
         float yellowPool = softBlob(warped, vec2(0.78, 0.84), vec2(0.86, 1.16), 0.4, 0.32);
         float violetPool = softBlob(warped, vec2(0.32, 0.74), vec2(1.18, 0.92), 0.45, 0.34);
+        float broadPink = smoothstep(-0.12, 1.08, warped.x * 0.92 + warped.y * 0.18);
+        float broadMint = 1.0 - smoothstep(0.08, 1.02, warped.x * 0.42 + warped.y * 0.88);
+        float broadYellow = smoothstep(0.18, 1.02, warped.x * 0.26 + warped.y * 0.96);
         float diagonalSheen = pow(smoothstep(0.78, 1.0, sin((warped.x * 3.2 - warped.y * 2.5 + 0.18) * 6.2831853) * 0.5 + 0.5), 4.2);
         float fineFoil = pow(smoothstep(0.86, 1.0, sin((warped.x * 15.0 + warped.y * 12.0 + uBackdropTime * 0.12) * 6.2831853) * 0.5 + 0.5), 3.0);
 
-        vec3 color = cyan;
-        color = mix(color, mint, mintPool * 0.9);
-        color = mix(color, pink, pinkPool * 0.78);
-        color = mix(color, acid, yellowPool * 0.72);
-        color = mix(color, violet, violetPool * 0.44);
-        color = mix(color, pearl, diagonalSheen * 0.28 + fineFoil * 0.12);
+        vec3 color = mix(cyan, pearl, 0.13);
+        color = mix(color, pink, broadPink * 0.24);
+        color = mix(color, mint, broadMint * 0.3);
+        color = mix(color, acid, broadYellow * 0.18);
+        color = mix(color, mint, mintPool * 0.94);
+        color = mix(color, pink, pinkPool * 0.86);
+        color = mix(color, acid, yellowPool * 0.78);
+        color = mix(color, violet, violetPool * 0.5);
+        color = mix(color, pearl, diagonalSheen * 0.2 + fineFoil * 0.09);
 
         float shardA = smoothstep(0.035, 0.0, lineDistance(warped, vec2(0.08, 0.78), vec2(0.88, 0.2)));
         float shardB = smoothstep(0.026, 0.0, lineDistance(warped, vec2(0.0, 0.3), vec2(0.72, 0.88)));
@@ -2648,9 +2671,11 @@ function createInfiniteBackdropMaterial() {
         color += vec3(1.0, 0.24, 0.76) * shardC * 0.1;
 
         float grain = hash(floor((uv + uBackdropTime * 0.006) * vec2(520.0, 390.0))) - 0.5;
-        color += grain * 0.045;
+        color += grain * 0.026;
+        color = pow(max(color, vec3(0.0)), vec3(0.78));
+        color = color * 1.08 + vec3(0.025, 0.02, 0.045);
         float luminance = dot(color, vec3(0.299, 0.587, 0.114));
-        return clamp(mix(vec3(luminance), color, 1.48), 0.0, 1.0);
+        return clamp(mix(vec3(luminance), color, 1.68), 0.0, 1.0);
       }
 
       vec3 windArchiveBackdrop(vec2 uv) {
@@ -4499,25 +4524,20 @@ function syncCinematicFinishPass() {
 function syncCinematicUniforms(pass: ShaderPass) {
   const uniforms = pass.uniforms as Record<string, THREE.IUniform<number | THREE.Vector2>>;
   const holoEditorialActive = isHoloScrollTheme();
-  const chromaticInvisibleCitiesActive = cycloramaBackgroundSettings.preset === 'mew-holo';
   uniforms.uTime.value = shaderTime;
   (uniforms.uResolution.value as THREE.Vector2).set(
     Math.max(1, canvasElement.width),
     Math.max(1, canvasElement.height),
   );
   uniforms.uEnabled.value = cinematicSettings.enabled ? 1 : 0;
-  uniforms.uFilmGrain.value = chromaticInvisibleCitiesActive ? 0.018 : cinematicSettings.filmGrain;
-  uniforms.uDiffusion.value = chromaticInvisibleCitiesActive ? 0 : cinematicSettings.diffusion;
-  uniforms.uHalation.value = chromaticInvisibleCitiesActive ? 0 : cinematicSettings.halation;
+  uniforms.uFilmGrain.value = cinematicSettings.filmGrain;
+  uniforms.uDiffusion.value = cinematicSettings.diffusion;
+  uniforms.uHalation.value = cinematicSettings.halation;
   uniforms.uVignette.value = holoEditorialActive ? 0 : cinematicSettings.vignette;
-  uniforms.uSaturation.value = chromaticInvisibleCitiesActive
-    ? 1
-    : holoEditorialActive
-    ? Math.max(cinematicSettings.saturation, 1.09)
-    : cinematicSettings.saturation;
-  uniforms.uContrast.value = chromaticInvisibleCitiesActive ? 1 : cinematicSettings.contrast;
-  uniforms.uWarmHighlights.value = chromaticInvisibleCitiesActive ? 0 : cinematicSettings.warmHighlights;
-  uniforms.uBlackLift.value = chromaticInvisibleCitiesActive ? 0 : cinematicSettings.blackLift;
+  uniforms.uSaturation.value = holoEditorialActive ? Math.max(cinematicSettings.saturation, 1.09) : cinematicSettings.saturation;
+  uniforms.uContrast.value = cinematicSettings.contrast;
+  uniforms.uWarmHighlights.value = cinematicSettings.warmHighlights;
+  uniforms.uBlackLift.value = cinematicSettings.blackLift;
 }
 
 function syncMewAlphaFeatherPass(enabled: boolean) {
@@ -4526,6 +4546,8 @@ function syncMewAlphaFeatherPass(enabled: boolean) {
   const uniforms = mewAlphaFeatherPass.uniforms as Record<string, THREE.IUniform<number>>;
   uniforms.uFeatherWidth.value = 0.31;
   uniforms.uFeatherOpacity.value = 1;
+  uniforms.uFeatherLift.value = 0.72;
+  uniforms.uFeatherSaturation.value = 0.46;
 }
 
 function syncIvoryBackgroundOpticsPass(enabled: boolean) {
