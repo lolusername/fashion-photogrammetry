@@ -480,7 +480,7 @@ select {
 }
 
 .stage__canvas[data-interaction-cursor="dress"]:active {
-  cursor: grabbing;
+  cursor: url("/cursors/dress-rotate.svg") 16 16, grabbing;
 }
 
 .stage__canvas[data-interaction-cursor="ghost"] {
