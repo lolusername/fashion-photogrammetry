@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ferdinando-sarmi-runtime-v1';
+const CACHE_NAME = 'fashion-system-runtime-v1';
 const CACHEABLE_ASSET = /\.(?:glb|jpg|jpeg|png|svg|webp)$/i;
 const HASHED_BUILD_ASSET = /^\/assets\/.+\.(?:css|js)$/i;
 const ITERATED_ASSET = /^\/patchwork_dress_latest\.glb$/i;

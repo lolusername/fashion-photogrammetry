@@ -100,7 +100,7 @@ export function createEditorialRail(options: EditorialRailOptions): EditorialRai
   });
 
   setTheme(options.activeThemeId);
-  setCollapsed(false);
+  setCollapsed(window.matchMedia('(max-width: 720px)').matches);
   setReady(false);
 
   return {

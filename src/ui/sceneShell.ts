@@ -37,11 +37,11 @@ export function createSceneShell(options: SceneShellOptions): SceneShell {
   `).join('');
 
   mount.innerHTML = `
-    <main class="stage" data-background-preset="${initialThemeId}" aria-label="Ferdinando Sarmi dress study">
+    <main class="stage" data-background-preset="${initialThemeId}" aria-label="Fashion System dress study">
       <div class="mew-editorial-page" aria-hidden="true">
         <div class="mew-editorial-page__mast">
-          <span>Ferdinando</span>
-          <span>Sarmi</span>
+          <span>Fashion</span>
+          <span>System</span>
         </div>
         <div class="mew-editorial-page__folio">Atelier / Scroll</div>
         <p class="mew-editorial-page__copy mew-editorial-page__copy--left">
@@ -53,7 +53,7 @@ export function createSceneShell(options: SceneShellOptions): SceneShell {
       </div>
       <div class="wind-editorial-page" aria-hidden="true">
         <header class="wind-editorial-page__header">
-          <span>Ferdinando Sarmi</span>
+          <span>Fashion System</span>
           <span>Archive / Wind study</span>
         </header>
         <div class="wind-editorial-page__folio">Photographs in motion</div>
@@ -72,7 +72,7 @@ export function createSceneShell(options: SceneShellOptions): SceneShell {
       <div class="blue-layout">
         <section class="blue-editorial-panel" aria-label="Dialectic dress archive">
           <header class="blue-editorial-panel__header">
-            <span>Ferdinando Sarmi</span>
+            <span>Fashion System</span>
             <span>Dialectic / Dress archive</span>
           </header>
           <div class="blue-editorial-panel__list">

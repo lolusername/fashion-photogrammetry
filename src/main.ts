@@ -1583,6 +1583,7 @@ function resetDressWind() {
   pointerWind.hasPointer = false;
   blueDressHover.overActiveDress = false;
   blueDressHover.lastMoveTime = Number.NEGATIVE_INFINITY;
+  delete canvasElement.dataset.interactionCursor;
   subjectMotion.targetYaw = 0;
   subjectMotion.targetCameraLift = 0;
 }
@@ -1716,6 +1717,7 @@ function handlePointerMove(event: PointerEvent) {
   const x = clamp01((event.clientX - bounds.left) / bounds.width);
   const y = clamp01(1 - (event.clientY - bounds.top) / bounds.height);
   const now = performance.now() * 0.001;
+  updateCanvasInteractionCursor(x, y);
 
   if (!pointerWind.hasPointer) {
     pointerWind.previous.set(x, y);
@@ -1751,6 +1753,42 @@ function handlePointerLeave() {
   pointerWind.lastMoveTime = performance.now() * 0.001 - 0.12;
   pointerWind.targetWind.set(0, 0, 0);
   blueDressHover.overActiveDress = false;
+  delete canvasElement.dataset.interactionCursor;
+}
+
+function updateCanvasInteractionCursor(x: number, y: number) {
+  if (ghostPickTargets.length > 0) {
+    ghostPointer.set(x * 2 - 1, y * 2 - 1);
+    ghostRaycaster.setFromCamera(ghostPointer, camera);
+    dressGhostGroup.updateMatrixWorld(true);
+
+    const ghostHit = ghostRaycaster
+      .intersectObjects(ghostPickTargets, false)
+      .find((intersection) => isObjectWorldVisible(intersection.object));
+    const ghostAssetId = ghostHit ? findDressAssetFromObject(ghostHit.object) : null;
+
+    if (ghostAssetId && ghostAssetId !== dressAssetSettings.asset) {
+      canvasElement.dataset.interactionCursor = 'ghost';
+      return;
+    }
+  }
+
+  if (activeFullDress) {
+    activeDressPointer.set(x * 2 - 1, y * 2 - 1);
+    activeDressRaycaster.setFromCamera(activeDressPointer, camera);
+    activeFullDress.loaded.dress.updateMatrixWorld(true);
+
+    const overActiveDress = activeDressRaycaster
+      .intersectObject(activeFullDress.loaded.dress, true)
+      .some((intersection) => (intersection.object as THREE.Mesh).isMesh);
+
+    if (overActiveDress) {
+      canvasElement.dataset.interactionCursor = 'dress';
+      return;
+    }
+  }
+
+  delete canvasElement.dataset.interactionCursor;
 }
 
 function updateBlueDressHoverFromPointer(x: number, y: number, movementX: number, now: number) {
@@ -4850,7 +4888,7 @@ function buildIvoryPortal() {
           <path d="${opening}" fill="#000000" />
           ${hairlineFragment}
           <g fill="#000000" font-family="Inter, ui-sans-serif, system-ui, sans-serif">
-            <text x="${w / 2}" y="${titleY}" text-anchor="middle" font-size="${titleSize}" font-weight="600" letter-spacing="${titleLS}">FERDINANDO SARMI</text>
+            <text x="${w / 2}" y="${titleY}" text-anchor="middle" font-size="${titleSize}" font-weight="600" letter-spacing="${titleLS}">FASHION SYSTEM</text>
             <text x="${w / 2}" y="${subY}" text-anchor="middle" font-size="${subSize}" font-weight="500" letter-spacing="${subLS}">${subtitle}</text>
             ${sideColumnsFragment}
           </g>
@@ -4934,7 +4972,7 @@ function buildSignalDiptych() {
   const headerStrip = `
     ${lineSeg(0, headerH, w, headerH, redDim)}
     <rect x="${leftPad}" y="${swatchY.toFixed(1)}" width="${swatchSize.toFixed(1)}" height="${swatchSize.toFixed(1)}" fill="${red}" />
-    <text x="${(leftPad + swatchSize + headerFont * 0.7).toFixed(1)}" y="${(headerY + headerFont * 0.36).toFixed(1)}" font-family="${mono}" font-size="${headerFont}" font-weight="800" letter-spacing="${(headerFont * 0.14).toFixed(2)}" fill="${red}">FERDINANDO SARMI</text>
+    <text x="${(leftPad + swatchSize + headerFont * 0.7).toFixed(1)}" y="${(headerY + headerFont * 0.36).toFixed(1)}" font-family="${mono}" font-size="${headerFont}" font-weight="800" letter-spacing="${(headerFont * 0.14).toFixed(2)}" fill="${red}">FASHION SYSTEM</text>
     <text x="${(w - rightPad).toFixed(1)}" y="${(headerY + headerFont * 0.36).toFixed(1)}" text-anchor="end" font-family="${mono}" font-size="${headerFont}" font-weight="500" letter-spacing="${(headerFont * 0.22).toFixed(2)}" fill="${inkDim}">FIG. SARMI</text>
   `;
 
