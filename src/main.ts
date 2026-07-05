@@ -272,6 +272,9 @@ const BLOOM_THRESHOLD = 0.9;
 const DRESS_TRANSITION_FX_ENABLED = true;
 const DRESS_TRANSITION_FX_DURATION = 0.72;
 const DRESS_TRANSITION_FX_OVERLAY_OPACITY = 0.26;
+const LOADING_OVERLAY_FADE_MS = 420;
+const INVISIBLE_CITIES_SUBJECT_SCALE = 0.9;
+const WIND_ARCHIVE_SUBJECT_SCALE = 0.78;
 const ARMS_GLOW_SCALE = 0.82;
 const SUBJECT_YAW_RESPONSE = 1.0;
 const SUBJECT_YAW_RANGE = Math.PI * 2.05;
@@ -880,6 +883,7 @@ const subjectMotion: SubjectMotionState = {
 };
 let gui: GUI | null = null;
 let queuedResizeFrame = 0;
+let editorialRailRevealTimeout = 0;
 
 initializeDressThumbnails();
 applyCycloramaBackgroundPreset(cycloramaBackgroundSettings.preset);
@@ -959,12 +963,21 @@ async function loadFullDressRecord(
 }
 
 function setLoadingOverlay(detail: string) {
+  if (editorialRailRevealTimeout) {
+    window.clearTimeout(editorialRailRevealTimeout);
+    editorialRailRevealTimeout = 0;
+  }
+  editorialRail.setReady(false);
   loadingOverlay.dataset.hidden = 'false';
   loadingDetail.textContent = detail;
 }
 
 function hideLoadingOverlay() {
   loadingOverlay.dataset.hidden = 'true';
+  editorialRailRevealTimeout = window.setTimeout(() => {
+    editorialRailRevealTimeout = 0;
+    editorialRail.setReady(true);
+  }, LOADING_OVERLAY_FADE_MS);
 }
 
 async function loadDressAsset(assetId: DressAssetId, useLoadingOverlay = false) {
@@ -1103,7 +1116,7 @@ function activateFullDress(record: FullDressRecord) {
   record.opacity = 0;
   record.targetOpacity = 1;
   setObjectOpacity(record.pivot, 0);
-  applyResponsiveCamera(window.innerWidth, window.innerHeight);
+  applyResponsiveCameraToCanvas();
   updateDebugState(record.loaded.bounds);
   updateGhostVisibility();
   updateThemeObjectVisibility();
@@ -2136,13 +2149,13 @@ function updateGhostVisibility(desiredGhostIds = getDesiredGhostAssetIds()) {
   const visibleGhostIds = new Set(desiredGhostIds);
   const visibleOrderedIds = DRESS_ASSET_ORDER.filter((assetId) => visibleGhostIds.has(assetId));
   const blue = isBlueStackTheme();
-  const mewScroll = isMewHoloScrollTheme();
+  const invisibleCities = cycloramaBackgroundSettings.preset === 'mew-holo';
   // Signal Black shows the ghost dresses only as nodes in the diptych graph (HTML
   // canvases reusing the thumbnail scenes), so suppress them in the main 3D scene.
   const signal = cycloramaBackgroundSettings.preset === 'signal-black';
 
   ghostDressCache.forEach((record, assetId) => {
-    const visibleInScene = !blue && !mewScroll && !signal && visibleGhostIds.has(assetId) && assetId !== dressAssetSettings.asset;
+    const visibleInScene = !blue && !invisibleCities && !signal && visibleGhostIds.has(assetId) && assetId !== dressAssetSettings.asset;
     record.root.visible = visibleInScene;
 
     if (visibleInScene) {
@@ -2173,7 +2186,7 @@ function syncGhostDepthMode() {
 function getDesiredGhostAssetIds(): DressAssetId[] {
   const activeAssetId = dressAssetSettings.asset;
 
-  if (isMewHoloScrollTheme()) {
+  if (cycloramaBackgroundSettings.preset === 'mew-holo') {
     return [];
   }
 
@@ -2218,9 +2231,39 @@ function applyGhostLayout(record: GhostDressRecord, visibleOrderedIds: DressAsse
   const aspect = window.innerWidth / Math.max(1, window.innerHeight);
   const ivory = cycloramaBackgroundSettings.preset === 'ivory-holo';
   const signal = cycloramaBackgroundSettings.preset === 'signal-black';
+  const windArchive = cycloramaBackgroundSettings.preset === 'tabla-rasa';
   const ghostIndex = Math.max(0, visibleOrderedIds.indexOf(record.asset.id));
   const centerOffset = (Math.max(1, visibleOrderedIds.length) - 1) * 0.5;
   const verticalOffset = (ghostIndex - centerOffset) * (portrait ? 0.28 : 0.34);
+
+  if (windArchive) {
+    const side = record.asset.id === DRESS_ASSET_ORDER[0] ? -1 : 1;
+    record.root.position.set(
+      side * (portrait ? 0.72 : 1.72),
+      portrait ? 0.2 : 0.38,
+      portrait ? -0.9 : -0.82,
+    );
+    record.root.rotation.y = side * -0.32;
+    record.root.scale.setScalar(portrait ? 0.3 : 0.56);
+
+    record.material.color.setHex(0x63737c);
+    record.material.opacity = 0.55;
+    record.material.depthTest = false;
+    record.material.depthWrite = false;
+    record.material.needsUpdate = true;
+    record.fillMaterial.color.setHex(0xf5f9fb);
+    record.fillMaterial.opacity = 0.015;
+    record.fillMaterial.depthTest = false;
+    record.fillMaterial.depthWrite = false;
+    record.fillMaterial.needsUpdate = true;
+    record.wireMaterial.color.setHex(0x63737c);
+    record.wireMaterial.opacity = 0.09;
+    record.wireMaterial.depthTest = false;
+    record.wireMaterial.depthWrite = false;
+    record.wireMaterial.needsUpdate = true;
+    return;
+  }
+
   const radiusX = portrait ? 0.92 : aspect > 1.35 ? 2.16 : 1.72;
   const depth = portrait ? -0.82 : -1.08;
 
@@ -5052,9 +5095,24 @@ function applyResponsiveCamera(width: number, height: number) {
   camera.updateProjectionMatrix();
 }
 
+function applyResponsiveCameraToCanvas() {
+  const bounds = canvasElement.getBoundingClientRect();
+  applyResponsiveCamera(
+    Math.max(1, Math.round(bounds.width || window.innerWidth)),
+    Math.max(1, Math.round(bounds.height || window.innerHeight)),
+  );
+}
+
 function applyThemeSubjectPlacement() {
+  const scale = cycloramaBackgroundSettings.preset === 'mew-holo'
+    ? INVISIBLE_CITIES_SUBJECT_SCALE
+    : cycloramaBackgroundSettings.preset === 'tabla-rasa'
+    ? WIND_ARCHIVE_SUBJECT_SCALE
+    : 1;
+
   fullDressCache.forEach((record) => {
     record.pivot.position.set(0, 0, 0);
+    record.pivot.scale.setScalar(scale);
   });
 }
 
@@ -5096,6 +5154,7 @@ function updateDebugState(bounds?: THREE.Box3) {
     visibleGhosts: Array.from(ghostDressCache.values())
       .filter((record) => record.root.visible)
       .map((record) => record.asset.id),
+    subjectScale: activeFullDress?.pivot.scale.x ?? null,
     subjectYaw: subjectMotion.yaw,
     subjectChildren: subjectMotion.pivot?.children.map((child) => child.name || child.type) ?? [],
     sceneChildren: scene.children.map((child) => child.name || child.type),
@@ -5201,6 +5260,10 @@ function dispose() {
   if (ghostLoadTimeout) {
     window.clearTimeout(ghostLoadTimeout);
     ghostLoadTimeout = 0;
+  }
+  if (editorialRailRevealTimeout) {
+    window.clearTimeout(editorialRailRevealTimeout);
+    editorialRailRevealTimeout = 0;
   }
   if (queuedResizeFrame) {
     window.cancelAnimationFrame(queuedResizeFrame);

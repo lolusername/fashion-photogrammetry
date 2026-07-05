@@ -1,19 +1,11 @@
 .experience-controls {
-  --experience-paper: rgba(239, 231, 215, 0.94);
-  --experience-ink: #17130f;
-  --experience-line: rgba(23, 19, 15, 0.58);
-  --experience-accent: #1d98a3;
+  --experience-paper: rgba(249, 252, 254, 0.95);
+  --experience-ink: #111111;
+  --experience-line: rgba(21, 38, 50, 0.26);
+  --experience-accent: #111111;
   position: relative;
   z-index: 30;
   color: var(--experience-ink);
-}
-
-.experience-controls[data-theme="blue"] {
-  --experience-accent: #c86843;
-}
-
-.experience-controls[data-theme="tabla-rasa"] {
-  --experience-accent: #9c4e37;
 }
 
 .experience-guide {
@@ -55,7 +47,7 @@
 .experience-guide[data-open="true"] .experience-guide__trigger {
   background:
     linear-gradient(90deg, var(--experience-accent) 0 4px, transparent 4px),
-    rgba(248, 242, 229, 0.98);
+    rgba(252, 254, 255, 0.99);
 }
 
 .experience-guide__trigger:focus-visible {
@@ -107,7 +99,7 @@
 .experience-guide__eyebrow {
   display: block;
   margin-bottom: 8px;
-  color: rgba(23, 19, 15, 0.58);
+  color: rgba(17, 25, 31, 0.54);
   font-family: Arial, Helvetica, sans-serif;
   font-size: 8px;
   letter-spacing: 0.16em;
@@ -125,7 +117,7 @@
 
 .experience-guide__panel p {
   margin: 0;
-  color: rgba(23, 19, 15, 0.72);
+  color: rgba(17, 25, 31, 0.72);
   font-family: Arial, Helvetica, sans-serif;
   font-size: 12px;
   line-height: 1.4;
@@ -167,7 +159,7 @@
 
 .dress-navigation > button:hover,
 .dress-navigation > button:focus-visible {
-  background: rgba(255, 255, 255, 0.38);
+  background: rgba(218, 233, 242, 0.3);
 }
 
 .dress-navigation > button:focus-visible {
@@ -193,7 +185,7 @@
 
 .dress-navigation__current > span,
 .dress-navigation__current small {
-  color: rgba(23, 19, 15, 0.58);
+  color: rgba(17, 25, 31, 0.54);
   font-size: 7px;
   letter-spacing: 0.13em;
   text-transform: uppercase;

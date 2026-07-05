@@ -21,7 +21,7 @@ export type DressAsset = {
 export const DRESS_ASSETS: Record<DressAssetId, DressAsset> = {
   original: {
     id: 'original',
-    label: 'Original',
+    label: 'Dress 1',
     url: '/dress.glb',
     swatch: 'linear-gradient(135deg, #7a624c, #eee2cc)',
     ghost: {
@@ -32,7 +32,7 @@ export const DRESS_ASSETS: Record<DressAssetId, DressAsset> = {
   },
   patchwork: {
     id: 'patchwork',
-    label: 'Patchwork',
+    label: 'Dress 2',
     url: '/patchwork_dress_latest.glb',
     swatch: 'linear-gradient(135deg, #282328 0%, #d7c8a8 34%, #c75f40 58%, #798936 100%)',
     ghost: {

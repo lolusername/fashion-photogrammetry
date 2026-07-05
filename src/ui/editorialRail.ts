@@ -6,6 +6,7 @@ export type EditorialRail = {
   element: HTMLElement;
   themeButtons: HTMLButtonElement[];
   setTheme: (themeId: PublicThemeId) => void;
+  setReady: (ready: boolean) => void;
 };
 
 type EditorialRailOptions = {
@@ -18,6 +19,7 @@ export function createEditorialRail(options: EditorialRailOptions): EditorialRai
   const { mount, themes } = options;
   const rail = document.createElement('aside');
   rail.className = 'editorial-rail';
+  rail.dataset.ready = 'false';
   rail.setAttribute('aria-label', 'Experience navigation');
   rail.innerHTML = `
     <header class="editorial-rail__header">
@@ -60,11 +62,18 @@ export function createEditorialRail(options: EditorialRailOptions): EditorialRai
     });
   };
 
+  const setReady = (ready: boolean) => {
+    rail.dataset.ready = String(ready);
+    rail.setAttribute('aria-hidden', String(!ready));
+  };
+
   setTheme(options.activeThemeId);
+  setReady(false);
 
   return {
     element: rail,
     themeButtons,
     setTheme,
+    setReady,
   };
 }
