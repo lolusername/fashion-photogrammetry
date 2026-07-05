@@ -107,12 +107,21 @@ select {
   letter-spacing: -0.072em;
 }
 
-.mew-title-opacity-control {
+.tuning-controls {
   position: fixed;
   top: 16px;
   right: calc(var(--editorial-rail-width, 154px) + 16px);
   z-index: 12;
   display: none;
+  gap: 6px;
+}
+
+.stage[data-tuning-controls="true"] .tuning-controls {
+  display: grid;
+}
+
+.tuning-control {
+  display: grid;
   grid-template-columns: auto minmax(120px, 180px) 38px;
   gap: 9px;
   align-items: center;
@@ -126,16 +135,20 @@ select {
   backdrop-filter: blur(12px);
 }
 
+.mew-title-opacity-control {
+  display: none;
+}
+
 .stage[data-background-preset="mew-holo"] .mew-title-opacity-control {
   display: grid;
 }
 
-.mew-title-opacity-control input {
+.tuning-control input {
   width: 100%;
   accent-color: #111111;
 }
 
-.mew-title-opacity-control output {
+.tuning-control output {
   text-align: right;
 }
 

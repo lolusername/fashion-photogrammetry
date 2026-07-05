@@ -88,6 +88,16 @@ type SubjectMotionState = {
   baseFocusTarget: THREE.Vector3;
 };
 
+type SubjectBloomPipeline = {
+  renderer: THREE.WebGLRenderer;
+  composer: EffectComposer;
+  bloomPass: UnrealBloomPass;
+  overlayScene: THREE.Scene;
+  overlayCamera: THREE.OrthographicCamera;
+  overlayGeometry: THREE.PlaneGeometry;
+  overlayMaterial: THREE.ShaderMaterial;
+};
+
 type CycloramaBackgroundSettings = {
   preset: CycloramaBackgroundPresetId;
 };
@@ -255,12 +265,15 @@ const dialecticPaperToggle = app.querySelector<HTMLButtonElement>('[data-dialect
 const mewTitleOpacityInput = app.querySelector<HTMLInputElement>('[data-mew-title-opacity]');
 const mewTitleOpacityValue = app.querySelector<HTMLOutputElement>('[data-mew-title-opacity-value]');
 const mewTitleWordElement = app.querySelector<HTMLSpanElement>('.mew-editorial-page__mast span:last-child');
+const dressBloomInput = app.querySelector<HTMLInputElement>('[data-dress-bloom]');
+const dressBloomValue = app.querySelector<HTMLOutputElement>('[data-dress-bloom-value]');
 
 const statusElement = status;
 const canvasElement = canvas;
 const loadingOverlay = loadingOverlayElement;
 const loadingDetail = loadingDetailElement;
 const showControls = new URLSearchParams(window.location.search).get('controls') === '1';
+stageElement.dataset.tuningControls = showControls ? 'true' : 'false';
 statusElement.textContent = 'Booting scene';
 
 THREE.ColorManagement.enabled = true;
@@ -271,6 +284,11 @@ const BLOOM_WIND_STRENGTH = 0.045;
 const BLOOM_BASE_RADIUS = 0.12;
 const BLOOM_WIND_RADIUS = 0.06;
 const BLOOM_THRESHOLD = 0.9;
+// The user-facing 0–100 slider maps into this deliberately narrow strength
+// range. Its default percentage lives in sceneShell.ts beside the input.
+const DRESS_BLOOM_MAX_STRENGTH = 0.12;
+const DRESS_BLOOM_RADIUS = 0.08;
+const DRESS_BLOOM_THRESHOLD = 0.55;
 // Dress transition FX (Blue + Mew Holo only): a bloom burst + glitch applied to
 // the dress/arm figure while it crossfades to another dress. Flip this single
 // flag to false to fully remove the effect (it then never renders).
@@ -807,6 +825,75 @@ const sharpSubjectOverlayMaterial = new THREE.MeshBasicMaterial({
 });
 sharpSubjectOverlayScene.add(new THREE.Mesh(sharpSubjectOverlayGeometry, sharpSubjectOverlayMaterial));
 
+function createSubjectBloomPipeline(targetRenderer: THREE.WebGLRenderer): SubjectBloomPipeline {
+  const renderTarget = new THREE.WebGLRenderTarget(1, 1, {
+    type: THREE.HalfFloatType,
+  });
+  const bloomComposer = new EffectComposer(targetRenderer, renderTarget);
+  bloomComposer.renderToScreen = false;
+  const renderPass = new RenderPass(scene, camera);
+  renderPass.clearAlpha = 0;
+  bloomComposer.addPass(renderPass);
+  const bloomOnlyPass = new UnrealBloomPass(
+    new THREE.Vector2(1, 1),
+    0,
+    DRESS_BLOOM_RADIUS,
+    DRESS_BLOOM_THRESHOLD,
+  );
+  bloomComposer.addPass(bloomOnlyPass);
+
+  const overlayScene = new THREE.Scene();
+  const overlayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const overlayGeometry = new THREE.PlaneGeometry(2, 2);
+  const overlayMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      uBloom: { value: bloomOnlyPass.renderTargetsHorizontal[0].texture },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D uBloom;
+      varying vec2 vUv;
+
+      void main() {
+        vec4 bloom = texture2D(uBloom, vUv);
+        gl_FragColor = vec4(bloom.rgb, bloom.a);
+      }
+    `,
+    transparent: true,
+    blending: THREE.CustomBlending,
+    blendEquation: THREE.AddEquation,
+    blendSrc: THREE.OneFactor,
+    blendDst: THREE.OneFactor,
+    blendEquationAlpha: THREE.AddEquation,
+    blendSrcAlpha: THREE.OneFactor,
+    blendDstAlpha: THREE.OneFactor,
+    depthTest: false,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  overlayScene.add(new THREE.Mesh(overlayGeometry, overlayMaterial));
+
+  return {
+    renderer: targetRenderer,
+    composer: bloomComposer,
+    bloomPass: bloomOnlyPass,
+    overlayScene,
+    overlayCamera,
+    overlayGeometry,
+    overlayMaterial,
+  };
+}
+
+const subjectBloomPipeline = createSubjectBloomPipeline(renderer);
+const mewSubjectBloomPipeline = createSubjectBloomPipeline(mewForegroundRenderer);
+
 const mewTitleOverlayCanvas = document.createElement('canvas');
 const maybeMewTitleOverlayContext = mewTitleOverlayCanvas.getContext('2d');
 if (!maybeMewTitleOverlayContext) {
@@ -870,6 +957,11 @@ let mewTitleBlackOpacity = THREE.MathUtils.clamp(
   100,
 ) / 100;
 mewTitleOverlayMaterial.uniforms.uBlackOpacity.value = mewTitleBlackOpacity;
+let dressBloomStrength =
+  THREE.MathUtils.clamp(Number(dressBloomInput?.value ?? 4), 0, 100) /
+  100 *
+  DRESS_BLOOM_MAX_STRENGTH;
+stageElement.dataset.dressBloomStrength = dressBloomStrength.toFixed(4);
 let windController: DressWindController | null = null;
 let armBloomController: ArmBloomController | null = null;
 let disposed = false;
@@ -1438,7 +1530,7 @@ function animate(timestamp?: number) {
       });
     }
     if (invisibleCitiesActive) {
-      renderMewForeground();
+      renderMewForeground(delta);
     } else {
       renderSharpSubjectOverlay(delta, {
         direct: true,
@@ -1483,7 +1575,7 @@ function getVisibleSubjectObjects() {
   return objects;
 }
 
-function renderMewForeground() {
+function renderMewForeground(delta: number) {
   const hiddenObjects: THREE.Object3D[] = [];
   [cycloramaMesh, infiniteBackdropMesh, holoAccentGroup, ivorySculptureGroup, photoPrintGroup, yellowBacking, paperRollMesh].forEach((object) => {
     if (object) {
@@ -1511,6 +1603,7 @@ function renderMewForeground() {
     mewForegroundRenderer.render(mewTitleOverlayScene, mewTitleOverlayCamera);
     mewForegroundRenderer.clearDepth();
     mewForegroundRenderer.render(scene, camera);
+    renderSubjectBloom(delta, mewSubjectBloomPipeline);
   } finally {
     mewForegroundRenderer.autoClear = true;
     scene.background = previousBackground;
@@ -1555,6 +1648,7 @@ function renderSharpSubjectOverlay(
       renderer.autoClear = false;
       renderer.render(sharpSubjectOverlayScene, sharpSubjectOverlayCamera);
     }
+    renderSubjectBloom(delta, subjectBloomPipeline);
   } finally {
     renderer.autoClear = previousAutoClear;
     scene.background = previousBackground;
@@ -1562,6 +1656,23 @@ function renderSharpSubjectOverlay(
       object.visible = previousVisibility[index];
     });
   }
+}
+
+function renderSubjectBloom(delta: number, pipeline: SubjectBloomPipeline) {
+  if (dressBloomStrength <= 0) {
+    return;
+  }
+
+  pipeline.bloomPass.strength = dressBloomStrength;
+  pipeline.bloomPass.radius = DRESS_BLOOM_RADIUS;
+  pipeline.bloomPass.threshold = DRESS_BLOOM_THRESHOLD;
+  pipeline.composer.render(delta);
+
+  const previousAutoClear = pipeline.renderer.autoClear;
+  pipeline.renderer.setRenderTarget(null);
+  pipeline.renderer.autoClear = false;
+  pipeline.renderer.render(pipeline.overlayScene, pipeline.overlayCamera);
+  pipeline.renderer.autoClear = previousAutoClear;
 }
 
 function updatePointerWind(delta: number) {
@@ -4530,6 +4641,30 @@ function handleMewTitleOpacityInput(event: Event) {
   }
 }
 
+function handleDressBloomInput(event: Event) {
+  const input = event.currentTarget as HTMLInputElement;
+  const percent = THREE.MathUtils.clamp(Number(input.value), 0, 100);
+  dressBloomStrength = percent / 100 * DRESS_BLOOM_MAX_STRENGTH;
+  stageElement.dataset.dressBloomStrength = dressBloomStrength.toFixed(4);
+  if (dressBloomValue) {
+    dressBloomValue.value = `${Math.round(percent)}%`;
+  }
+}
+
+function handleTuningControlsShortcut(event: KeyboardEvent) {
+  if (
+    event.shiftKey &&
+    !event.altKey &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    event.key.toLowerCase() === 't'
+  ) {
+    event.preventDefault();
+    const visible = stageElement.dataset.tuningControls === 'true';
+    stageElement.dataset.tuningControls = visible ? 'false' : 'true';
+  }
+}
+
 function handleDressNavigationClick(event: MouseEvent) {
   const direction = Number((event.currentTarget as HTMLButtonElement).dataset.dressDirection);
   if (!Number.isFinite(direction) || direction === 0) {
@@ -4939,6 +5074,8 @@ function resize() {
   composer.setSize(width, height);
   subjectFxComposer.setSize(width, height);
   sharpSubjectComposer.setSize(width, height);
+  subjectBloomPipeline.composer.setSize(width, height);
+  mewSubjectBloomPipeline.composer.setSize(width, height);
   camera.aspect = width / height;
   applyResponsiveCamera(width, height);
   updateInfiniteBackdropScale();
@@ -5510,6 +5647,8 @@ dressButtons.forEach((button) => button.addEventListener('click', handleDressAss
 dressNavigationButtons.forEach((button) => button.addEventListener('click', handleDressNavigationClick));
 dialecticPaperToggle?.addEventListener('click', handleDialecticPaperToggle);
 mewTitleOpacityInput?.addEventListener('input', handleMewTitleOpacityInput);
+dressBloomInput?.addEventListener('input', handleDressBloomInput);
+window.addEventListener('keydown', handleTuningControlsShortcut);
 if (signalDiptychElement) {
   signalDiptychElement.addEventListener('click', handleSignalNodeClick);
   signalDiptychElement.addEventListener('keydown', handleSignalNodeKeydown);
@@ -5552,6 +5691,8 @@ function dispose() {
   dressNavigationButtons.forEach((button) => button.removeEventListener('click', handleDressNavigationClick));
   dialecticPaperToggle?.removeEventListener('click', handleDialecticPaperToggle);
   mewTitleOpacityInput?.removeEventListener('input', handleMewTitleOpacityInput);
+  dressBloomInput?.removeEventListener('input', handleDressBloomInput);
+  window.removeEventListener('keydown', handleTuningControlsShortcut);
   if (signalDiptychElement) {
     signalDiptychElement.removeEventListener('click', handleSignalNodeClick);
     signalDiptychElement.removeEventListener('keydown', handleSignalNodeKeydown);
@@ -5585,6 +5726,14 @@ function dispose() {
   sharpSubjectRenderTarget.dispose();
   sharpSubjectOverlayMaterial.dispose();
   sharpSubjectOverlayGeometry.dispose();
+  subjectBloomPipeline.composer.dispose();
+  subjectBloomPipeline.bloomPass.dispose();
+  subjectBloomPipeline.overlayMaterial.dispose();
+  subjectBloomPipeline.overlayGeometry.dispose();
+  mewSubjectBloomPipeline.composer.dispose();
+  mewSubjectBloomPipeline.bloomPass.dispose();
+  mewSubjectBloomPipeline.overlayMaterial.dispose();
+  mewSubjectBloomPipeline.overlayGeometry.dispose();
   mewTitleOverlayTexture.dispose();
   mewBackgroundCanvasTexture.dispose();
   mewTitleOverlayMaterial.dispose();

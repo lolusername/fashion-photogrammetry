@@ -52,19 +52,34 @@ export function createSceneShell(options: SceneShellOptions): SceneShell {
           Scroll or swipe to turn the dress. At a half rotation, the next scan enters the chromatic field.
         </p>
       </div>
-      <label class="mew-title-opacity-control">
-        <span>Title black</span>
-        <input
-          type="range"
-          min="0"
-          max="100"
-          step="1"
-          value="100"
-          data-mew-title-opacity
-          aria-label="Invisible Cities title black opacity"
-        />
-        <output data-mew-title-opacity-value>100%</output>
-      </label>
+      <div class="tuning-controls" aria-label="Visual tuning controls">
+        <label class="tuning-control dress-bloom-control">
+          <span>Dress bloom</span>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value="4"
+            data-dress-bloom
+            aria-label="Dress bloom strength"
+          />
+          <output data-dress-bloom-value>4%</output>
+        </label>
+        <label class="tuning-control mew-title-opacity-control">
+          <span>Title black</span>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value="100"
+            data-mew-title-opacity
+            aria-label="Invisible Cities title black opacity"
+          />
+          <output data-mew-title-opacity-value>100%</output>
+        </label>
+      </div>
       <div class="wind-editorial-page" aria-hidden="true">
         <header class="wind-editorial-page__header">
           <span>Fashion System</span>
