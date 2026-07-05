@@ -506,8 +506,6 @@ const MEW_ALPHA_FEATHER_SHADER = {
     tDiffuse: { value: null },
     uFeatherWidth: { value: 0.31 },
     uFeatherOpacity: { value: 1 },
-    uFeatherLift: { value: 0.72 },
-    uFeatherSaturation: { value: 0.46 },
   },
   vertexShader: `
     varying vec2 vUv;
@@ -521,8 +519,6 @@ const MEW_ALPHA_FEATHER_SHADER = {
     uniform sampler2D tDiffuse;
     uniform float uFeatherWidth;
     uniform float uFeatherOpacity;
-    uniform float uFeatherLift;
-    uniform float uFeatherSaturation;
     varying vec2 vUv;
 
     void main() {
@@ -539,16 +535,8 @@ const MEW_ALPHA_FEATHER_SHADER = {
       float noisyDistanceToEdge = distanceToEdge + edgeNoise;
       float mask = smoothstep(0.0, uFeatherWidth, noisyDistanceToEdge);
 
-      // Lift and saturate the dissolving edge so the rendered dress bleeds into
-      // the colorful field instead of ending on a hard rectangular canvas.
-      float featherBand = (1.0 - mask) * smoothstep(0.01, uFeatherWidth * 0.82, noisyDistanceToEdge);
-      float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
-      color.rgb = mix(vec3(luma), color.rgb, 1.0 + featherBand * uFeatherSaturation);
-      color.rgb = mix(
-        color.rgb,
-        min(color.rgb * (1.0 + featherBand * 0.38) + vec3(0.08, 0.045, 0.09) * featherBand, vec3(1.0)),
-        uFeatherLift
-      );
+      // Alpha-only feather. Do not alter RGB here: color lifting/desaturation in
+      // the mask reads as a faint rectangular overlay on the holo backdrop.
       color.a *= mix(1.0, mask, uFeatherOpacity);
       gl_FragColor = color;
     }
@@ -1291,7 +1279,7 @@ function animate(timestamp?: number) {
     : 0;
 
   bloomPass.threshold = invisibleCitiesActive
-    ? 0.88
+    ? 0.84
     : ivoryThemeActive
     ? 0.82
     : blueThemeActive || signalThemeActive
@@ -1311,7 +1299,7 @@ function animate(timestamp?: number) {
     : ivoryThemeActive
     ? 0.06
     : invisibleCitiesActive
-    ? 0.08 + pointerWind.activity * 0.025
+    ? 0.22 + pointerWind.activity * 0.035
     : signalThemeActive
     ? 0.05
     : BLOOM_BASE_RADIUS + pointerWind.activity * BLOOM_WIND_RADIUS;
@@ -1324,7 +1312,7 @@ function animate(timestamp?: number) {
   }
   syncIvoryBackgroundOpticsPass(ivoryThemeActive);
   syncCinematicFinishPass();
-  syncMewAlphaFeatherPass(cycloramaBackgroundSettings.preset === 'mew-holo');
+  syncMewAlphaFeatherPass(false);
 
   if (dressTransitionFx > 0) {
     dressTransitionFx = Math.max(0, dressTransitionFx - delta / DRESS_TRANSITION_FX_DURATION);
@@ -1345,10 +1333,7 @@ function animate(timestamp?: number) {
         object.visible = true;
       });
     }
-    renderSharpSubjectOverlay(delta, {
-      direct: invisibleCitiesActive,
-      hideGhosts: ivoryThemeActive,
-    });
+    renderSharpSubjectOverlay(delta, { hideGhosts: ivoryThemeActive });
   } else {
     composer.render(delta);
   }
@@ -1388,10 +1373,7 @@ function getVisibleFullDressObjects() {
   return objects;
 }
 
-function renderSharpSubjectOverlay(
-  delta: number,
-  options: { direct?: boolean; hideGhosts?: boolean } = {},
-) {
+function renderSharpSubjectOverlay(delta: number, options: { hideGhosts?: boolean } = {}) {
   const hiddenObjects: THREE.Object3D[] = [];
   [cycloramaMesh, infiniteBackdropMesh, holoAccentGroup, ivorySculptureGroup, photoPrintGroup, yellowBacking, paperRollMesh].forEach((object) => {
     if (object) {
@@ -1411,20 +1393,11 @@ function renderSharpSubjectOverlay(
 
   scene.background = null;
   try {
-    if (options.direct) {
-      // The OG Invisible Cities composition feathers only the chromatic field.
-      // The dress and ghost scans are rendered back over it without the
-      // feather pass, preserving the original cut-paper editorial hierarchy.
-      renderer.autoClear = false;
-      renderer.clearDepth();
-      renderer.render(scene, camera);
-    } else {
-      sharpSubjectRenderPass.clearAlpha = 0;
-      sharpSubjectComposer.render(delta);
-      renderer.setRenderTarget(null);
-      renderer.autoClear = false;
-      renderer.render(sharpSubjectOverlayScene, sharpSubjectOverlayCamera);
-    }
+    sharpSubjectRenderPass.clearAlpha = 0;
+    sharpSubjectComposer.render(delta);
+    renderer.setRenderTarget(null);
+    renderer.autoClear = false;
+    renderer.render(sharpSubjectOverlayScene, sharpSubjectOverlayCamera);
   } finally {
     renderer.autoClear = previousAutoClear;
     scene.background = previousBackground;
@@ -2641,53 +2614,39 @@ function createInfiniteBackdropMaterial() {
 
       vec3 mewBackdrop(vec2 uv) {
         vec2 warped = uv;
-        warped.x += sin(uv.y * 5.2 + uBackdropTime * 0.09) * 0.035;
-        warped.y += sin(uv.x * 4.6 - uBackdropTime * 0.07) * 0.03;
+        warped.x += sin(uv.y * 4.2 + uBackdropTime * 0.045) * 0.014;
+        warped.y += sin(uv.x * 3.8 - uBackdropTime * 0.038) * 0.012;
         warped += vec2(
-          sin((uv.x + uv.y) * 8.0 + uBackdropTime * 0.06),
-          cos((uv.x - uv.y) * 7.0 - uBackdropTime * 0.05)
-        ) * 0.018;
+          sin((uv.x + uv.y) * 6.0 + uBackdropTime * 0.03),
+          cos((uv.x - uv.y) * 5.0 - uBackdropTime * 0.026)
+        ) * 0.007;
 
-        vec3 cyan = vec3(0.28, 0.98, 1.0);
-        vec3 mint = vec3(0.42, 1.0, 0.36);
-        vec3 acid = vec3(1.0, 0.98, 0.1);
-        vec3 pink = vec3(1.0, 0.08, 0.76);
-        vec3 pearl = vec3(1.0, 0.9, 0.98);
-        vec3 violet = vec3(0.52, 0.32, 1.0);
+        vec3 color = sampleEditorialPaper(warped);
+        vec3 fadedRose = vec3(0.72, 0.27, 0.31);
+        vec3 oxidizedTeal = vec3(0.12, 0.38, 0.38);
+        vec3 inkBlue = vec3(0.08, 0.16, 0.25);
+        vec3 antiqueGold = vec3(0.73, 0.49, 0.2);
+        float roseField = softBlob(warped, vec2(0.18, 0.7), vec2(0.78, 1.05), 0.52, 0.34);
+        float tealField = softBlob(warped, vec2(0.82, 0.38), vec2(0.86, 0.8), 0.52, 0.34);
+        float blueField = softBlob(warped, vec2(0.48, 0.6), vec2(0.92, 0.76), 0.48, 0.34);
+        float goldField = softBlob(warped, vec2(0.7, 0.84), vec2(0.86, 1.1), 0.4, 0.32);
+        color = mix(color, screenBlend(color, fadedRose), roseField * 0.18);
+        color = mix(color, screenBlend(color, oxidizedTeal), tealField * 0.16);
+        color = mix(color, screenBlend(color, inkBlue), blueField * 0.1);
+        color = mix(color, screenBlend(color, antiqueGold), goldField * 0.12);
 
-        float mintPool = softBlob(warped, vec2(0.2, 0.26), vec2(0.75, 1.08), 0.64, 0.38);
-        float pinkPool = softBlob(warped, vec2(0.72, 0.46), vec2(1.08, 0.78), 0.52, 0.34);
-        float yellowPool = softBlob(warped, vec2(0.78, 0.84), vec2(0.86, 1.16), 0.4, 0.32);
-        float violetPool = softBlob(warped, vec2(0.32, 0.74), vec2(1.18, 0.92), 0.45, 0.34);
-        float broadPink = smoothstep(-0.12, 1.08, warped.x * 0.92 + warped.y * 0.18);
-        float broadMint = 1.0 - smoothstep(0.08, 1.02, warped.x * 0.42 + warped.y * 0.88);
-        float broadYellow = smoothstep(0.18, 1.02, warped.x * 0.26 + warped.y * 0.96);
-        float diagonalSheen = pow(smoothstep(0.78, 1.0, sin((warped.x * 3.2 - warped.y * 2.5 + 0.18) * 6.2831853) * 0.5 + 0.5), 4.2);
-        float fineFoil = pow(smoothstep(0.86, 1.0, sin((warped.x * 15.0 + warped.y * 12.0 + uBackdropTime * 0.12) * 6.2831853) * 0.5 + 0.5), 3.0);
-
-        vec3 color = mix(cyan, pearl, 0.13);
-        color = mix(color, pink, broadPink * 0.24);
-        color = mix(color, mint, broadMint * 0.3);
-        color = mix(color, acid, broadYellow * 0.18);
-        color = mix(color, mint, mintPool * 0.94);
-        color = mix(color, pink, pinkPool * 0.86);
-        color = mix(color, acid, yellowPool * 0.78);
-        color = mix(color, violet, violetPool * 0.5);
-        color = mix(color, pearl, diagonalSheen * 0.2 + fineFoil * 0.09);
-
-        float shardA = smoothstep(0.035, 0.0, lineDistance(warped, vec2(0.08, 0.78), vec2(0.88, 0.2)));
-        float shardB = smoothstep(0.026, 0.0, lineDistance(warped, vec2(0.0, 0.3), vec2(0.72, 0.88)));
-        float shardC = smoothstep(0.02, 0.0, lineDistance(warped, vec2(0.5, 0.02), vec2(1.0, 0.58)));
-        color += vec3(1.0, 0.96, 0.68) * shardA * 0.12;
-        color += vec3(0.4, 1.0, 0.7) * shardB * 0.1;
-        color += vec3(1.0, 0.24, 0.76) * shardC * 0.1;
-
-        float grain = hash(floor((uv + uBackdropTime * 0.006) * vec2(520.0, 390.0))) - 0.5;
-        color += grain * 0.026;
-        color = pow(max(color, vec3(0.0)), vec3(0.78));
-        color = color * 1.08 + vec3(0.025, 0.02, 0.045);
-        float luminance = dot(color, vec3(0.299, 0.587, 0.114));
-        return clamp(mix(vec3(luminance), color, 1.68), 0.0, 1.0);
+        float fineFoil = pow(
+          smoothstep(
+            0.88,
+            1.0,
+            sin((warped.x * 15.0 + warped.y * 11.0 + uBackdropTime * 0.05) * 6.2831853) * 0.5 + 0.5
+          ),
+          3.0
+        );
+        color += vec3(0.18, 0.13, 0.08) * fineFoil * 0.025;
+        float grain = hash(floor((uv + uBackdropTime * 0.002) * vec2(520.0, 390.0))) - 0.5;
+        color += grain * 0.008;
+        return clamp(color, 0.0, 1.0);
       }
 
       vec3 windArchiveBackdrop(vec2 uv) {
@@ -2935,12 +2894,12 @@ function addMewHoloAccents(targetScene: THREE.Scene) {
     return rememberHoloPaletteMaterial(material, color, opacity);
   };
 
-  const pink = makeMaterial(0xff22b8, 0.34);
-  const green = makeMaterial(0x63ff28, 0.34);
-  const yellow = makeMaterial(0xffec0f, 0.4);
-  const cyan = makeMaterial(0x35f1ff, 0.3);
-  const violet = makeMaterial(0x8d45ff, 0.26);
-  const pearl = makeMaterial(0xfff1c4, 0.38);
+  const pink = makeMaterial(0xb55249, 0.2);
+  const green = makeMaterial(0x75846a, 0.18);
+  const yellow = makeMaterial(0xb78a3d, 0.22);
+  const cyan = makeMaterial(0x4c7978, 0.18);
+  const violet = makeMaterial(0x574c5e, 0.16);
+  const pearl = makeMaterial(0xd8c4a0, 0.24);
 
   const shardGeometry = trackGeometry(createShardGeometry());
   const longShardGeometry = trackGeometry(createLongShardGeometry());
@@ -3130,11 +3089,11 @@ function createGroundedIvoryAmphora(marbleMaterial: THREE.Material, glossMateria
 
 function addMewHoloSculptures(group: THREE.Group) {
   const marbleMaterial = createHoloMarbleMaterial();
-  const pinkGloss = createCandyGlossMaterial(0xff2db6, 0.72);
-  const greenGloss = createCandyGlossMaterial(0x75ff2c, 0.68);
-  const yellowGloss = createCandyGlossMaterial(0xffe80f, 0.72);
-  const cyanGloss = createCandyGlossMaterial(0x27eaff, 0.58);
-  const violetGloss = createCandyGlossMaterial(0x8d55ff, 0.62);
+  const pinkGloss = createCandyGlossMaterial(0xa64e45, 0.54);
+  const greenGloss = createCandyGlossMaterial(0x6f8067, 0.5);
+  const yellowGloss = createCandyGlossMaterial(0xb3853b, 0.54);
+  const cyanGloss = createCandyGlossMaterial(0x477473, 0.48);
+  const violetGloss = createCandyGlossMaterial(0x51465a, 0.46);
 
   const blobGeometry = trackGeometry(new THREE.SphereGeometry(1, 32, 18));
   const gemGeometry = trackGeometry(new THREE.OctahedronGeometry(0.45, 1));
@@ -4558,8 +4517,6 @@ function syncMewAlphaFeatherPass(enabled: boolean) {
   const uniforms = mewAlphaFeatherPass.uniforms as Record<string, THREE.IUniform<number>>;
   uniforms.uFeatherWidth.value = 0.31;
   uniforms.uFeatherOpacity.value = 1;
-  uniforms.uFeatherLift.value = 0.72;
-  uniforms.uFeatherSaturation.value = 0.46;
 }
 
 function syncIvoryBackgroundOpticsPass(enabled: boolean) {

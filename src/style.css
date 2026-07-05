@@ -58,6 +58,151 @@ select {
   pointer-events: none;
 }
 
+.stage[data-background-preset="mew-holo"] {
+  background:
+    url("/editorial/sarmi-background-horizontal.png") center / cover no-repeat,
+    #e7d2ad;
+}
+
+.stage[data-background-preset="mew-holo"]::after {
+  display: none;
+}
+
+.mew-editorial-page {
+  position: fixed;
+  inset: 0 var(--editorial-rail-width, 154px) 0 0;
+  z-index: 2;
+  display: none;
+  overflow: hidden;
+  color: rgba(35, 27, 21, 0.72);
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  pointer-events: none;
+}
+
+.stage[data-background-preset="mew-holo"] .mew-editorial-page {
+  display: block;
+}
+
+.mew-editorial-page__header {
+  position: absolute;
+  top: clamp(22px, 3.2vh, 42px);
+  left: max(3vw, 18px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: clamp(22px, 4vw, 70px);
+  align-items: start;
+  width: min(45vw, 720px);
+}
+
+.mew-editorial-page__mast {
+  color: rgba(17, 17, 17, 0.78);
+  font-size: clamp(17px, 1.55vw, 23px);
+  font-weight: 300;
+  line-height: 1;
+  letter-spacing: 0.18em;
+}
+
+.mew-editorial-page__nav {
+  display: flex;
+  gap: clamp(24px, 3.6vw, 64px);
+  align-items: baseline;
+  color: rgba(35, 27, 21, 0.7);
+  font-size: clamp(10px, 0.76vw, 12px);
+  line-height: 1;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.mew-editorial-page__nav-group {
+  display: inline-flex;
+  gap: 0.28em;
+}
+
+.mew-editorial-page__nav-active {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+
+.mew-editorial-page__folio {
+  position: absolute;
+  top: clamp(24px, 3.4vh, 44px);
+  right: max(3.4vw, 22px);
+  color: rgba(17, 17, 17, 0.5);
+  font-size: clamp(9px, 0.72vw, 11px);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.mew-editorial-page__list {
+  position: absolute;
+  top: clamp(210px, 30vh, 330px);
+  left: max(3vw, 18px);
+  display: flex;
+  flex-direction: column;
+  width: min(24vw, 390px);
+}
+
+.mew-editorial-page__row {
+  position: relative;
+  display: grid;
+  grid-template-columns:
+    minmax(54px, 0.9fr)
+    minmax(92px, 1.2fr);
+  gap: clamp(8px, 1vw, 14px);
+  align-items: baseline;
+  padding: clamp(9px, 1.25vh, 14px) clamp(7px, 0.8vw, 11px) clamp(9px, 1.25vh, 14px) 0;
+  border-top: 1px solid rgba(17, 17, 17, 0.36);
+  color: rgba(17, 17, 17, 0.56);
+  font-size: clamp(9px, 0.64vw, 11px);
+  line-height: 1.28;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mew-editorial-page__row span:nth-child(3),
+.mew-editorial-page__row span:nth-child(4) {
+  display: none;
+}
+
+.mew-editorial-page__row:last-child {
+  border-bottom: 1px solid rgba(17, 17, 17, 0.36);
+}
+
+.mew-editorial-page__row::after {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 1px;
+  height: 7px;
+  background: rgba(17, 17, 17, 0.36);
+  content: "";
+}
+
+.mew-editorial-page__copy {
+  position: absolute;
+  width: min(24vw, 360px);
+  margin: 0;
+  color: rgba(35, 27, 21, 0.66);
+  font-family: "Times New Roman", Times, "Liberation Serif", Georgia, serif;
+  font-size: clamp(12px, 0.9vw, 15px);
+  line-height: 1.52;
+  letter-spacing: 0.014em;
+  text-shadow: 0 0 20px rgba(244, 226, 194, 0.78);
+}
+
+.mew-editorial-page__copy--left {
+  bottom: clamp(86px, 11vh, 132px);
+  left: max(3vw, 18px);
+}
+
+.mew-editorial-page__copy--right {
+  right: max(3vw, 18px);
+  bottom: clamp(122px, 17vh, 210px);
+  text-align: right;
+}
+
 .blue-layout {
   position: fixed;
   inset: 0 var(--editorial-rail-width, 154px) 0 0;
@@ -154,15 +299,6 @@ select {
 }
 
 .stage[data-background-preset="blue"] .dress-switcher {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  z-index: 6;
-  display: flex;
-  transform: translateX(-50%);
-}
-
-.stage[data-background-preset="mew-holo"] .dress-switcher {
   position: absolute;
   top: 12px;
   left: 50%;
@@ -433,6 +569,64 @@ select {
 }
 
 @media (max-width: 720px) {
+  .stage[data-background-preset="mew-holo"] {
+    background:
+      url("/editorial/sarmi-background-vertical.jpg") center / cover no-repeat,
+      #e7d2ad;
+  }
+
+  .mew-editorial-page__header {
+    top: 16px;
+    left: 14px;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    width: calc(100% - 28px);
+  }
+
+  .mew-editorial-page__mast {
+    font-size: 13px;
+    letter-spacing: 0.12em;
+  }
+
+  .mew-editorial-page__nav {
+    gap: 22px;
+    font-size: 10px;
+  }
+
+  .mew-editorial-page__folio {
+    display: none;
+  }
+
+  .mew-editorial-page__list {
+    top: 96px;
+    left: 14px;
+    width: min(44vw, 210px);
+  }
+
+  .mew-editorial-page__row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+    padding: 7px 8px 7px 0;
+    font-size: 9.5px;
+    line-height: 1.2;
+  }
+
+  .mew-editorial-page__copy {
+    width: min(42vw, 180px);
+    font-size: clamp(10px, 2.6vw, 12px);
+    line-height: 1.32;
+  }
+
+  .mew-editorial-page__copy--left {
+    bottom: 132px;
+    left: 14px;
+  }
+
+  .mew-editorial-page__copy--right {
+    right: 14px;
+    bottom: 168px;
+  }
+
   .stage[data-background-preset="blue"] .blue-layout {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: 132px minmax(0, 1fr);
