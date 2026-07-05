@@ -5141,14 +5141,16 @@ function applyResponsiveCameraToCanvas() {
 }
 
 function applyThemeSubjectPlacement() {
-  const scale = cycloramaBackgroundSettings.preset === 'mew-holo'
+  const invisibleCities = cycloramaBackgroundSettings.preset === 'mew-holo';
+  const scale = invisibleCities
     ? INVISIBLE_CITIES_SUBJECT_SCALE
     : cycloramaBackgroundSettings.preset === 'tabla-rasa'
     ? WIND_ARCHIVE_SUBJECT_SCALE
     : 1;
+  const lift = invisibleCities ? (isMobileViewport() ? 0 : 0.42) : 0;
 
   fullDressCache.forEach((record) => {
-    record.pivot.position.set(0, 0, 0);
+    record.pivot.position.set(0, lift, 0);
     record.pivot.scale.setScalar(scale);
   });
 }
