@@ -40,9 +40,166 @@ import {
   createDressWindController,
 } from './shaders/dressWindMaterial';
 
+/**
+ * ============================================================================
+ * READING GUIDE: HOW THIS THREE.JS APPLICATION WORKS
+ * ============================================================================
+ *
+ * This file is intentionally documented as a teaching text. You do not need to
+ * understand every subsystem before changing one small visual parameter.
+ * Start with the mental model below, then jump to the section you care about.
+ *
+ * THE SHORTEST POSSIBLE THREE.JS MENTAL MODEL
+ * --------------------------------------------
+ *
+ * 1. A `Scene` is a tree of objects. It is not an image and does not draw
+ *    anything by itself.
+ * 2. A `Camera` describes the point of view.
+ * 3. A `WebGLRenderer` asks the GPU to draw the scene from that camera.
+ * 4. A visible `Mesh` is normally:
+ *
+ *        Mesh = Geometry (shape/vertices) + Material (how pixels look)
+ *
+ * 5. A transform (`position`, `rotation`, `scale`) belongs to every
+ *    `Object3D`. Child transforms are evaluated relative to their parent.
+ * 6. The animation loop updates state and then renders a new frame.
+ *
+ * The scene graph in this app is conceptually:
+ *
+ *   scene
+ *   ├── camera
+ *   │   └── infiniteBackdropMesh  (camera-attached, always fills the view)
+ *   ├── active dress pivot
+ *   │   ├── normalized GLB model
+ *   │   ├── ordinary contact shadow
+ *   │   └── Dialectic halftone floor shadow
+ *   ├── cyclorama / physical studio
+ *   ├── Wind Archive shadow + falling photo group
+ *   ├── theme-specific sculpture groups
+ *   └── ghost dress group
+ *
+ * COORDINATE SYSTEMS: THE SOURCE OF MOST 3D CONFUSION
+ * ---------------------------------------------------
+ *
+ * Three.js uses a right-handed coordinate system:
+ *
+ *   +X = screen-right in the default front view
+ *   +Y = up
+ *   +Z = toward the camera in this scene
+ *
+ * "Local space" means coordinates relative to an object's parent. "World
+ * space" means coordinates after every parent transform has been applied.
+ * "View/camera space" means coordinates relative to the camera. "Clip space"
+ * is the GPU's post-projection space; after division by W, visible X and Y are
+ * approximately -1..+1. "UV space" is a 2D texture coordinate system, usually
+ * 0..1 from one edge of a surface to the other.
+ *
+ * A model imported from a GLB may have arbitrary dimensions and origin. The
+ * loader normalizes and grounds it in `loadDress.ts`. We then put it inside a
+ * `THREE.Group` called a pivot. Rotating/scaling the pivot controls the complete
+ * subject without destroying the model's internal node hierarchy.
+ *
+ * CPU CODE VERSUS GPU SHADER CODE
+ * -------------------------------
+ *
+ * TypeScript in this file runs on the CPU. GLSL strings (`vertexShader` and
+ * `fragmentShader`) are compiled and run on the GPU:
+ *
+ * - A vertex shader runs once per vertex. It normally transforms a vertex from
+ *   local model coordinates into clip space.
+ * - A fragment shader runs for each covered pixel/sample. It decides that
+ *   pixel's color and alpha.
+ * - A `uniform` is a CPU-controlled value shared by every shader invocation in
+ *   one draw call: time, opacity, a texture, etc.
+ * - A `varying` is written by the vertex shader, interpolated across the
+ *   triangle, and read by the fragment shader. `vUv` is the common example.
+ * - A `sampler2D` is a texture; `texture2D(texture, uv)` reads it.
+ * - `mix(a, b, t)` linearly interpolates; `smoothstep` creates a soft threshold;
+ *   `fract`, `floor`, `sin`, and `dot` are often combined to make cheap
+ *   deterministic pseudo-random patterns.
+ *
+ * THE STANDARD VERTEX-SHADER LINE
+ * -------------------------------
+ *
+ * Many shaders below contain:
+ *
+ *   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+ *
+ * Read it from right to left:
+ *
+ * - `position` is the local geometry vertex.
+ * - `modelViewMatrix` combines the object's world transform with the inverse
+ *   camera transform, producing camera/view space.
+ * - `projectionMatrix` applies perspective and produces clip space.
+ * - `gl_Position` is the required vertex-shader output.
+ *
+ * RENDER TARGETS AND POST-PROCESSING
+ * ----------------------------------
+ *
+ * Normal rendering goes directly to the canvas. Post-processing instead draws
+ * into an offscreen texture called a render target. `EffectComposer` runs a
+ * chain of passes over that texture:
+ *
+ *   RenderPass → Bloom → Bokeh → custom color/grain shader → OutputPass
+ *
+ * Each pass consumes an image and produces another image. This app also uses
+ * separate offscreen pipelines for the subject. That is selective
+ * post-processing: the background can stay crisp while the dress receives a
+ * controlled bloom, or a transition glitch can affect only the dress.
+ *
+ * ALPHA, DEPTH, AND BLENDING
+ * --------------------------
+ *
+ * - Alpha is transparency. It does not by itself decide draw order.
+ * - The depth buffer stores the closest rendered surface at each pixel.
+ * - `depthTest` checks whether a fragment is behind something already drawn.
+ * - `depthWrite` decides whether a fragment updates the depth buffer.
+ * - Transparent overlay planes commonly use `depthTest: false` and
+ *   `depthWrite: false`, because they are deliberately composited in screen
+ *   order rather than treated as solid 3D surfaces.
+ * - Additive blending adds light values and is useful for bloom. Ordinary
+ *   alpha blending mixes foreground and background.
+ *
+ * PERFORMANCE RULES USED HERE
+ * ---------------------------
+ *
+ * - Temporary vectors used every frame are allocated once and reused. Creating
+ *   thousands of `Vector3` objects per second causes garbage-collection pauses.
+ * - Pixel ratio is capped. Doubling pixel ratio can approximately quadruple
+ *   the number of pixels the GPU must shade.
+ * - Loaded dresses and ghost models are cached, but old GPU resources are
+ *   disposed when evicted.
+ * - The render loop uses delta time, so motion speed is mostly independent of
+ *   monitor refresh rate.
+ *
+ * SAFE TUNING WORKFLOW
+ * --------------------
+ *
+ * 1. Find the named mesh/material/pass rather than changing a random number.
+ * 2. Change one variable at a time.
+ * 3. Test every theme that shares that renderer or shader.
+ * 4. Check both dresses: their source GLBs have different silhouettes.
+ * 5. Run `npm run build`; TypeScript catches many integration mistakes, while
+ *    live visual inspection catches composition and shader mistakes.
+ *
+ * The large section comments below explain the implementation in the order the
+ * application creates and renders it.
+ */
+
+// ---------------------------------------------------------------------------
+// APPLICATION STATE TYPES
+// ---------------------------------------------------------------------------
+// These types describe mutable runtime state. They contain no behavior by
+// themselves; they make relationships explicit and let TypeScript catch
+// accidental use of the wrong coordinate/value kind.
+
 type PointerWindState = {
+  // Pointer positions are normalized to 0..1 so interaction remains consistent
+  // when the canvas changes size.
   previous: THREE.Vector2;
   gustCenter: THREE.Vector2;
+  // `targetWind` changes immediately from input. `wind` eases toward it. This
+  // two-value pattern prevents pointer events from producing visual snapping.
   targetWind: THREE.Vector3;
   wind: THREE.Vector3;
   hasPointer: boolean;
@@ -79,7 +236,11 @@ type MewHoloScrollState = {
 };
 
 type SubjectMotionState = {
+  // A Group is used as a transform pivot around the imported dress. Keeping a
+  // nullable reference allows the app to boot before the asynchronous GLB load
+  // completes.
   pivot: THREE.Group | null;
+  // Angles are radians. One complete turn is 2π, not 360.
   yaw: number;
   targetYaw: number;
   cameraLift: number;
@@ -89,6 +250,8 @@ type SubjectMotionState = {
 };
 
 type SubjectBloomPipeline = {
+  // Selective bloom needs its own renderer/composer/output texture and a second
+  // tiny scene containing a full-screen plane that composites the result.
   renderer: THREE.WebGLRenderer;
   composer: EffectComposer;
   bloomPass: UnrealBloomPass;
@@ -103,6 +266,8 @@ type CycloramaBackgroundSettings = {
 };
 
 type CycloramaBackgroundUniforms = {
+  // `THREE.IUniform<T>` is an object with a mutable `.value`. Three.js keeps the
+  // object identity while uploading its current value to the GPU each frame.
   uCycloTextureMode: THREE.IUniform<number>;
   uCycloTileRepeat: THREE.IUniform<THREE.Vector2>;
   uCycloCoverScale: THREE.IUniform<THREE.Vector2>;
@@ -150,13 +315,19 @@ type ScreenSpaceBounds = {
 };
 
 type PhotoPrintParticle = {
+  // `root` owns the shadow, white print paper, and image meshes so one transform
+  // can move/rotate/scale the entire print.
   root: THREE.Group;
+  // Linear velocity is world-units/second. Angular velocity is radians/second.
   velocity: THREE.Vector3;
   angularVelocity: THREE.Vector3;
   restQuaternion: THREE.Quaternion;
   age: number;
   floorY: number;
+  // null = airborne. A number = seconds since first touching the floor.
   floorContactAge: number | null;
+  // Prints that would cross the dress are released downward and removed once
+  // offscreen instead of being allowed to obscure the garment.
   discarding: boolean;
   baseScale: number;
   seed: number;
@@ -164,6 +335,8 @@ type PhotoPrintParticle = {
 };
 
 type FullDressRecord = {
+  // The immutable catalog entry (`asset`) is kept beside the loaded Three.js
+  // objects and crossfade/cache metadata that belong to that entry.
   asset: DressAsset;
   loaded: LoadedDress;
   pivot: THREE.Group;
@@ -196,6 +369,11 @@ type SignalGraphNodeRecord = {
   renderer: THREE.WebGLRenderer;
 };
 
+// ---------------------------------------------------------------------------
+// INITIAL URL STATE AND UI CONSTRUCTION
+// ---------------------------------------------------------------------------
+// The URL is treated as shareable application state. Reading it before building
+// the UI avoids rendering a default theme and then visibly jumping to another.
 const initialExperienceState = readInitialExperienceState(window.location.search);
 const CYCLO_BACKGROUND_DEFAULT: PublicThemeId = initialExperienceState.themeId;
 const DRESS_ASSET_DEFAULT: DressAssetId = initialExperienceState.dressId;
@@ -223,9 +401,14 @@ const DRESS_ASSET_GUI_OPTIONS = Object.fromEntries(
 const app = document.querySelector<HTMLDivElement>('#app');
 
 if (!app) {
+  // Failing immediately is better than allowing dozens of later null-reference
+  // errors that hide the real integration problem.
   throw new Error('Missing #app mount element.');
 }
 
+// The DOM UI is deliberately built outside Three.js. HTML is superior for text,
+// accessibility, responsive layout, and focus/keyboard behavior. Three.js owns
+// the canvases and the imagery inside them.
 const sceneShell = createSceneShell({
   mount: app,
   initialThemeId: CYCLO_BACKGROUND_DEFAULT,
@@ -268,6 +451,8 @@ const mewTitleWordElement = app.querySelector<HTMLSpanElement>('.mew-editorial-p
 const dressBloomInput = app.querySelector<HTMLInputElement>('[data-dress-bloom]');
 const dressBloomValue = app.querySelector<HTMLOutputElement>('[data-dress-bloom-value]');
 
+// Aliases below preserve older names used by the scene code while keeping the
+// UI construction module's API descriptive.
 const statusElement = status;
 const canvasElement = canvas;
 const loadingOverlay = loadingOverlayElement;
@@ -278,6 +463,18 @@ statusElement.textContent = 'Booting scene';
 
 THREE.ColorManagement.enabled = true;
 
+// ---------------------------------------------------------------------------
+// ART-DIRECTION AND SIMULATION CONSTANTS
+// ---------------------------------------------------------------------------
+// Values here fall into four categories:
+// 1. visual strengths (bloom, glow, color finish),
+// 2. response rates (how quickly eased state follows input),
+// 3. world-space dimensions (studio and print sizes), and
+// 4. resource limits (cache sizes and pixel ratio).
+//
+// Response rates are generally used with `1 - exp(-delta * rate)`. That form is
+// frame-rate independent: a 60 Hz display and a 120 Hz display converge at
+// nearly the same speed in real seconds.
 const settings: DressWindSettings = { ...DRESS_WIND_PRESETS.editorial };
 const BLOOM_BASE_STRENGTH = .02;
 const BLOOM_WIND_STRENGTH = 0.045;
@@ -326,8 +523,12 @@ const PHOTO_PRINT_CARD_WIDTH = 0.68;
 const PHOTO_PRINT_CARD_HEIGHT = 0.398;
 const PHOTO_PRINT_IMAGE_WIDTH = 0.644;
 const PHOTO_PRINT_IMAGE_HEIGHT = 0.362;
+// Z is the spawn depth in world space. Y is the landing-plane height.
 const PHOTO_PRINT_SPAWN_Z = 1.22;
 const PHOTO_PRINT_FLOOR_Y = 0.24;
+// PlaneGeometry begins in local XY. Rotating around X tips its local Y axis
+// backward into world Z. This angle is shared by resting photos and the
+// projected archive shadows so they appear to occupy one invisible floor.
 const PHOTO_PRINT_SURFACE_TILT = -1.12;
 const PHOTO_PRINT_GRAVITY = 1.42;
 const PHOTO_PRINT_LAYER_GAP = 0.0008;
@@ -349,6 +550,8 @@ const CYCLO_WALL_HEIGHT = 4.72;
 const CYCLO_RADIUS = 1.22;
 const CYCLO_TEXTURE_REPEAT_X = 3.25;
 const CYCLO_TEXTURE_FALLBACK_ASPECT = 663 / 617;
+// Browser pixel ratio may be 2 or 3 on high-density displays. Capping it at 1.5
+// trades a small amount of sharpness for substantially fewer shaded pixels.
 const MAX_PIXEL_RATIO = 1.5;
 const cycloramaBackgroundSettings: CycloramaBackgroundSettings = {
   preset: CYCLO_BACKGROUND_DEFAULT,
@@ -357,6 +560,8 @@ const dressAssetSettings = {
   asset: DRESS_ASSET_DEFAULT,
 };
 const cinematicSettings = {
+  // These are deliberately restrained. Post effects should change texture and
+  // cohesion without becoming more important than the garment.
   enabled: true,
   filmGrain: 0.132,
   diffusion: 0.018,
@@ -381,6 +586,8 @@ const ivoryBackgroundOpticsSettings = {
   pulseSpeed: 0.68,
 };
 const cycloramaBackgroundUniforms: CycloramaBackgroundUniforms = {
+  // Numeric modes are used because WebGL 1-era shader branching cannot switch
+  // on strings. TypeScript maps friendly theme IDs to shader-friendly numbers.
   uCycloTextureMode: { value: CYCLO_TEXTURE_MODE_VALUES[CYCLO_BACKGROUND_PRESETS[CYCLO_BACKGROUND_DEFAULT].textureMode] },
   uCycloTileRepeat: { value: new THREE.Vector2() },
   uCycloCoverScale: { value: new THREE.Vector2(1, 1) },
@@ -398,6 +605,20 @@ const infiniteBackdropUniforms: InfiniteBackdropUniforms = {
   uGraphicVerticalAspect: { value: 941 / 1672 },
   uHeroStillAspect: { value: 907 / 512 },
 };
+
+// ---------------------------------------------------------------------------
+// FULL-FRAME CINEMATIC FINISH SHADER
+// ---------------------------------------------------------------------------
+// A ShaderPass automatically supplies the previous pass as `tDiffuse`. This is
+// an image-space shader: it knows nothing about dresses, lights, or 3D world
+// positions. It sees only the completed RGBA image and its UV coordinates.
+//
+// Important distinction:
+// - Material shader: determines how a 3D surface is drawn.
+// - Post-processing shader: transforms an already rendered 2D image.
+//
+// This one implements subtle diffusion, halation, color shaping, grain, and a
+// vignette. All calculations remain in one pass to avoid extra render targets.
 const CINEMATIC_FINISH_SHADER = {
   uniforms: {
     tDiffuse: { value: null },
@@ -414,14 +635,20 @@ const CINEMATIC_FINISH_SHADER = {
     uBlackLift: { value: cinematicSettings.blackLift },
   },
   vertexShader: `
+    // Varying values are interpolated by the rasterizer. If one vertex writes
+    // UV (0,0) and another writes (1,0), fragments between them receive values
+    // between 0 and 1 automatically.
     varying vec2 vUv;
 
     void main() {
       vUv = uv;
+      // This shader runs on a full-screen plane, but using the standard matrix
+      // transform keeps it compatible with Three.js's ShaderPass machinery.
       gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     }
   `,
   fragmentShader: `
+    // tDiffuse is the color texture produced by the preceding composer pass.
     uniform sampler2D tDiffuse;
     uniform float uTime;
     uniform vec2 uResolution;
@@ -436,10 +663,14 @@ const CINEMATIC_FINISH_SHADER = {
     uniform float uBlackLift;
     varying vec2 vUv;
 
+    // Fast deterministic pseudo-randomness. This is not cryptographic or truly
+    // random; neighboring inputs merely produce visually uncorrelated values.
     float hash(vec2 value) {
       return fract(sin(dot(value, vec2(12.9898, 78.233))) * 43758.5453123);
     }
 
+    // Human vision is more sensitive to green than blue. These Rec. 601-style
+    // weights estimate perceived brightness rather than averaging RGB equally.
     float lumaOf(vec3 color) {
       return dot(color, vec3(0.299, 0.587, 0.114));
     }
@@ -447,11 +678,15 @@ const CINEMATIC_FINISH_SHADER = {
     void main() {
       vec4 source = texture2D(tDiffuse, vUv);
 
+      // ShaderPasses are cheaper to leave wired into the composer and bypass in
+      // GLSL than to repeatedly rebuild the pass graph.
       if (uEnabled < 0.5) {
         gl_FragColor = source;
         return;
       }
 
+      // One texel equals one pixel in UV units. At 1000 px wide, texel.x is
+      // 0.001. Sampling vUv + texel * 2.0 reads two pixels away.
       vec2 texel = 1.0 / max(uResolution, vec2(1.0));
       vec3 color = source.rgb;
       float luma = lumaOf(color);
@@ -460,6 +695,9 @@ const CINEMATIC_FINISH_SHADER = {
       // A tiny diffusion blend softens scan harshness without making the frame
       // look blurred. Neighbor samples are alpha-weighted so the same shader can
       // be used on transparent subject overlays without darkening object edges.
+      // This hand-written nine-tap blur is a small convolution kernel. A true
+      // Gaussian blur may use more taps or two separable passes; nine taps are
+      // sufficient because the requested diffusion is very low.
       vec3 soft = color * source.a * 0.36;
       float softWeight = source.a * 0.36;
       vec4 softSample = texture2D(tDiffuse, vUv + texel * vec2(1.6, 0.0));
@@ -487,12 +725,18 @@ const CINEMATIC_FINISH_SHADER = {
       soft += softSample.rgb * softSample.a * 0.08;
       softWeight += softSample.a * 0.08;
       soft = softWeight > 0.0001 ? soft / softWeight : color;
+      // mix(original, blurred, amount) performs linear interpolation. Bright
+      // regions receive slightly more diffusion than shadows.
       color = mix(color, soft, uDiffusion * (0.55 + highlights * 0.75));
 
-      // Halation only uses bright samples and warms them, like a very restrained film glow.
+      // Halation is not the same as bloom. Bloom spreads neutral light from
+      // bright areas. Film halation is a warm/red fringe caused by light
+      // scattering inside a film base. We sample a ring around the pixel, keep
+      // only highlights, tint them warm, and add a very small amount.
       vec3 halo = vec3(0.0);
       float haloWeight = 0.0;
       for (int i = 0; i < 8; i += 1) {
+        // 0.785398... is π/4, so eight iterations sample eight directions.
         float a = float(i) * 0.78539816339;
         vec2 direction = vec2(cos(a), sin(a));
         vec4 haloSample = texture2D(tDiffuse, vUv + direction * texel * 4.2);
@@ -503,25 +747,44 @@ const CINEMATIC_FINISH_SHADER = {
       halo /= max(haloWeight, 1.0);
       color += halo * vec3(1.0, 0.56, 0.32) * uHalation * highlights;
 
+      // Color grading stage:
+      // - saturation interpolates between grayscale and RGB,
+      // - contrast expands/compresses values around middle gray,
+      // - black lift raises dark values,
+      // - warmHighlights biases only bright pixels.
       luma = lumaOf(color);
       color = mix(vec3(luma), color, uSaturation);
       color = (color - 0.5) * uContrast + 0.5;
       color += uBlackLift * (1.0 - luma);
       color += vec3(1.0, 0.72, 0.44) * highlights * uWarmHighlights;
 
+      // Two differently scaled noise fields reduce obvious repetition.
+      // floor() groups pixels into tiny grain cells. Time changes their seed,
+      // producing moving grain rather than a frozen screen-door texture.
       float grainA = hash(floor(vUv * vec2(820.0, 1180.0)) + uTime * 23.0);
       float grainB = hash(vUv * vec2(1620.0, 940.0) + uTime * 41.0);
       float grain = ((grainA * 0.68 + grainB * 0.32) - 0.5) * uFilmGrain;
       color += grain * (0.82 + luma * 0.22);
 
+      // Vignette distance is measured from image center. dot(v,v) is squared
+      // vector length and avoids the square root performed by length(v).
       vec2 centeredUv = vUv - 0.5;
       float edge = smoothstep(0.18, 0.78, dot(centeredUv, centeredUv) * 1.55);
       color *= 1.0 - edge * uVignette;
 
+      // Preserve source alpha so this pass also works on subject-only render
+      // targets. Clamp prevents later blending from receiving invalid ranges.
       gl_FragColor = vec4(clamp(color, 0.0, 1.0), source.a);
     }
   `,
 };
+
+// ---------------------------------------------------------------------------
+// INVISIBLE CITIES EDGE-FEATHER SHADER
+// ---------------------------------------------------------------------------
+// This pass softens the rectangular boundary of an offscreen layer. It changes
+// alpha near the canvas edges while keeping the center untouched. The RGB lift
+// in the feather band prevents semitransparent edges from looking dirty gray.
 const MEW_ALPHA_FEATHER_SHADER = {
   uniforms: {
     tDiffuse: { value: null },
@@ -552,12 +815,17 @@ const MEW_ALPHA_FEATHER_SHADER = {
       // Rectangular image-space layer mask: the center stays fully sharp, and
       // each canvas edge dissolves outward. This preserves the editorial page
       // rectangle while avoiding a hard cut.
+      // At UV 0.5, distance to either edge is 0.5. At UV 0.01, the nearest
+      // horizontal edge is 0.01. Taking the minimum of X/Y produces a rectangle
+      // rather than a circular vignette.
       vec2 edgeDistance = min(vUv, 1.0 - vUv);
       float distanceToEdge = min(edgeDistance.x, edgeDistance.y);
       float edgeNoise =
         sin(vUv.x * 19.0 + vUv.y * 4.0) * 0.012 +
         sin(vUv.y * 15.0 - vUv.x * 6.0) * 0.008;
       float noisyDistanceToEdge = distanceToEdge + edgeNoise;
+      // smoothstep(edge0, edge1, x) returns 0 below edge0, 1 above edge1,
+      // and a smooth Hermite curve between. It is the workhorse for soft masks.
       float mask = smoothstep(0.0, uFeatherWidth, noisyDistanceToEdge);
       float featherBand = (1.0 - mask) * smoothstep(0.01, uFeatherWidth * 0.82, noisyDistanceToEdge);
 
@@ -576,6 +844,13 @@ const MEW_ALPHA_FEATHER_SHADER = {
     }
   `,
 };
+
+// ---------------------------------------------------------------------------
+// IVORY OPTICAL-DISTORTION SHADER
+// ---------------------------------------------------------------------------
+// Instead of moving geometry, this shader offsets the UV used to sample the
+// already-rendered image. That technique is commonly called a screen-space
+// distortion, displacement, refraction, heat-haze, or lens warp.
 const IVORY_BACKGROUND_OPTICS_SHADER = {
   uniforms: {
     tDiffuse: { value: null },
@@ -616,8 +891,12 @@ const IVORY_BACKGROUND_OPTICS_SHADER = {
       float glassShade = 0.0;
 
       for (int i = 0; i < 4; i += 1) {
+        // GLSL loops generally require compile-time fixed bounds on broad WebGL
+        // hardware. Four lobes are unrolled by the shader compiler.
         float fi = float(i);
         float cycle = uTime * uPulseSpeed / (5.8 + fi * 1.35) + fi * 8.73;
+        // id changes once per pulse and reseeds its location. phase travels
+        // continuously from 0..1 during that pulse.
         float id = floor(cycle);
         float phase = fract(cycle);
         float lobeActive = step(0.48, hash(vec2(id, fi)));
@@ -638,6 +917,8 @@ const IVORY_BACKGROUND_OPTICS_SHADER = {
           mix(0.72, 1.42, hash(vec2(id + 13.0, fi))),
           mix(0.72, 1.42, hash(vec2(id + 17.0, fi)))
         );
+        // Multiplying X by aspect makes a circular distance field remain round
+        // on a wide viewport. axis then intentionally makes it elliptical.
         vec2 aspectDelta = (uv - center) * vec2(uAspect, 1.0) * axis;
         float distanceToLobe = length(aspectDelta);
         float falloff = smoothstep(radius, 0.0, distanceToLobe);
@@ -645,12 +926,16 @@ const IVORY_BACKGROUND_OPTICS_SHADER = {
         vec2 radial = normalize(aspectDelta + vec2(0.0001));
         vec2 uvRadial = radial / vec2(uAspect, 1.0) / axis;
         float organicPulse = 0.72 + 0.28 * sin(phase * 6.2831853 + hash(vec2(id, fi + 23.0)) * 6.2831853);
+        // We accumulate UV displacement, not RGB color. Positive/negative sign
+        // alternates between bulging and pinching lens behavior.
         totalOffset += uvRadial * falloff * falloff * pulse * organicPulse * sign * uStrength;
         float lensEdge = pow(max(falloff * (1.0 - falloff), 0.0) * 4.0, 1.35);
         glassShade += lensEdge * pulse * 0.035;
         glassShade += falloff * pulse * sign * 0.008;
       }
 
+      // Clamp avoids sampling outside the render target, where wrap mode could
+      // create a bright seam or repeat the opposite side of the frame.
       vec2 sampleUv = clamp(uv - totalOffset, vec2(0.001), vec2(0.999));
       vec4 color = texture2D(tDiffuse, sampleUv);
       color.rgb += glassShade;
@@ -683,9 +968,22 @@ let paperRollMaterial: THREE.MeshStandardMaterial | null = null;
 let paperRollMesh: THREE.Mesh | null = null;
 let yellowBacking: THREE.Mesh | null = null;
 let yellowBackingMaterial: THREE.MeshBasicMaterial | null = null;
+
+// ---------------------------------------------------------------------------
+// CORE THREE.JS OBJECTS: SCENE, CAMERA, AND RENDERERS
+// ---------------------------------------------------------------------------
+// `Scene` extends Object3D and is the root of the transform hierarchy. Adding an
+// object makes it eligible for rendering; visibility, camera frustum, material,
+// and render layers still determine whether pixels are actually produced.
 const scene = new THREE.Scene();
+// `background` clears untouched pixels to a solid color. Fog is evaluated by
+// compatible materials using camera distance; FogExp2 density grows
+// exponentially, which creates a softer horizon than linear fog.
 scene.background = new THREE.Color(0x758fa3);
 scene.fog = new THREE.FogExp2(0x758fa3, 0.01);
+
+// Group has no geometry/material. It exists only to organize children and apply
+// one transform/visibility flag to all of them.
 const dressGhostGroup = new THREE.Group();
 dressGhostGroup.name = 'dress ghost layer';
 scene.add(dressGhostGroup);
@@ -694,11 +992,22 @@ const disposableMaterials: THREE.Material[] = [];
 const disposableGeometries: THREE.BufferGeometry[] = [];
 const disposableTextures: THREE.Texture[] = [];
 
+// PerspectiveCamera arguments:
+// 1. vertical field of view in degrees,
+// 2. aspect ratio (corrected in `resize`),
+// 3. near clipping distance,
+// 4. far clipping distance.
+// Geometry closer than near or farther than far is clipped. Keeping the range
+// reasonably tight improves depth-buffer precision.
 const camera = new THREE.PerspectiveCamera(38, 1, 0.05, 80);
 camera.position.set(0.22, 1.35, 4.15);
+// The focus target is a world-space point used by camera controls, bokeh focus,
+// and responsive camera placement. It is not a visible scene object.
 const focusTarget = new THREE.Vector3(0, 1.05, 0);
 scene.add(camera);
 
+// The renderer owns a WebGL context for one canvas. `alpha: true` allows the
+// canvas to composite with HTML. Antialias requests multisample edge smoothing.
 const renderer = new THREE.WebGLRenderer({
   canvas: canvasElement,
   alpha: true,
@@ -707,12 +1016,21 @@ const renderer = new THREE.WebGLRenderer({
 });
 renderer.setClearColor(0x758fa3, 1);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
+// ACES filmic tone mapping compresses HDR lighting into display range with a
+// photographic highlight rolloff. Exposure scales the HDR values before that
+// curve. sRGB output converts linear rendering values for a normal display.
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.64;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.shadowMap.enabled = false;
+// This setting is dormant while shadowMap is disabled. The visible "shadows"
+// in this app are authored transparent planes, which are cheaper and more
+// controllable for this editorial composition than dynamic shadow maps.
 renderer.shadowMap.type = THREE.PCFShadowMap;
 
+// Invisible Cities uses a second transparent canvas because its title mask and
+// subject have a special layer order relative to HTML. A renderer cannot render
+// into two canvases; therefore the second canvas needs its own renderer/context.
 const mewForegroundRenderer = new THREE.WebGLRenderer({
   canvas: mewForegroundCanvasElement,
   alpha: true,
@@ -726,11 +1044,17 @@ mewForegroundRenderer.toneMappingExposure = 0.64;
 mewForegroundRenderer.outputColorSpace = THREE.SRGBColorSpace;
 mewForegroundRenderer.shadowMap.enabled = false;
 
+// PBR materials need believable environment reflections even when the scene has
+// no photographed HDRI. RoomEnvironment procedurally supplies one. PMREM
+// prefilters it into roughness levels so rough materials sample blurred
+// reflections and glossy materials sample sharper reflections.
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 const mewForegroundPmrem = new THREE.PMREMGenerator(mewForegroundRenderer);
 const mewForegroundEnvironment = mewForegroundPmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
+// OrbitControls is retained for its damped camera-target math, but direct user
+// pan/rotate/zoom are disabled. The app drives the camera programmatically.
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
@@ -745,8 +1069,18 @@ statusElement.textContent = 'Building studio';
 addStudio(scene);
 statusElement.textContent = 'Setting post';
 
+// ---------------------------------------------------------------------------
+// MAIN POST-PROCESSING PIPELINE
+// ---------------------------------------------------------------------------
+// EffectComposer ping-pongs between offscreen render targets. Pass order is
+// semantic: bloom before the finish shader means grain is not bloomed; bokeh
+// before the finish shader means grain remains sharp instead of being blurred.
 const composer = new EffectComposer(renderer);
+// RenderPass converts the current 3D scene/camera into the first 2D texture.
 composer.addPass(new RenderPass(scene, camera));
+// UnrealBloomPass extracts pixels above `threshold`, blurs them at several
+// scales, then adds the glow back. Strength controls amount; radius controls
+// spread. High threshold avoids making ordinary fabric highlights look shiny.
 const bloomPass = new UnrealBloomPass(
   new THREE.Vector2(1, 1),
   BLOOM_BASE_STRENGTH,
@@ -754,6 +1088,8 @@ const bloomPass = new UnrealBloomPass(
   BLOOM_THRESHOLD,
 );
 composer.addPass(bloomPass);
+// BokehPass simulates depth of field from the depth buffer. Aperture controls
+// blur strength, focus is a camera-space distance, and maxblur caps the radius.
 const bokehPass = new BokehPass(scene, camera, {
   focus: camera.position.distanceTo(focusTarget),
   aperture: 0.013,
@@ -770,6 +1106,9 @@ composer.addPass(cinematicFinishPass);
 const mewAlphaFeatherPass = new ShaderPass(MEW_ALPHA_FEATHER_SHADER);
 mewAlphaFeatherPass.enabled = false;
 composer.addPass(mewAlphaFeatherPass);
+// OutputPass performs the renderer's final tone/color-space output transform.
+// It belongs last; applying sRGB conversion in the middle would make later math
+// operate on nonlinear display values.
 composer.addPass(new OutputPass());
 
 // --- Dress transition FX pipeline (self-contained; remove this block + its
@@ -777,6 +1116,8 @@ composer.addPass(new OutputPass());
 // with a strong bloom + GlitchPass, then we additively composite it over the
 // final frame during a transition so the burst/glitch is localized to the figure.
 const subjectFxRenderTarget = new THREE.WebGLRenderTarget(1, 1, {
+  // Half-float keeps values above display white so bloom can respond to HDR
+  // highlights without the memory cost of full 32-bit floating-point channels.
   type: THREE.HalfFloatType,
 });
 subjectFxRenderTarget.texture.colorSpace = THREE.SRGBColorSpace;
@@ -797,6 +1138,8 @@ const subjectFxOverlayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const subjectFxOverlayMaterial = new THREE.MeshBasicMaterial({
   map: subjectFxRenderTarget.texture,
   transparent: true,
+  // Additive blending behaves approximately as output = source + destination.
+  // Black contributes nothing; bright FX light accumulates over the base frame.
   blending: THREE.AdditiveBlending,
   depthTest: false,
   depthWrite: false,
@@ -830,6 +1173,11 @@ const sharpSubjectOverlayMaterial = new THREE.MeshBasicMaterial({
 sharpSubjectOverlayScene.add(new THREE.Mesh(sharpSubjectOverlayGeometry, sharpSubjectOverlayMaterial));
 
 function createSubjectBloomPipeline(targetRenderer: THREE.WebGLRenderer): SubjectBloomPipeline {
+  // Selective bloom recipe:
+  // 1. Temporarily hide everything except the subject.
+  // 2. Render that subject into this offscreen composer.
+  // 3. Read UnrealBloomPass's blurred light texture.
+  // 4. Add it over the already rendered frame with a full-screen plane.
   const renderTarget = new THREE.WebGLRenderTarget(1, 1, {
     type: THREE.HalfFloatType,
   });
@@ -866,11 +1214,15 @@ function createSubjectBloomPipeline(targetRenderer: THREE.WebGLRenderer): Subjec
       varying vec2 vUv;
 
       void main() {
+        // This pass does no further shaping; its purpose is to expose the bloom
+        // texture with alpha so custom additive blending can composite it.
         vec4 bloom = texture2D(uBloom, vUv);
         gl_FragColor = vec4(bloom.rgb, bloom.a);
       }
     `,
     transparent: true,
+    // Explicit blend factors are used for both RGB and alpha. OneFactor means
+    // neither side is multiplied down: the channels are simply added.
     blending: THREE.CustomBlending,
     blendEquation: THREE.AddEquation,
     blendSrc: THREE.OneFactor,
@@ -898,6 +1250,12 @@ function createSubjectBloomPipeline(targetRenderer: THREE.WebGLRenderer): Subjec
 const subjectBloomPipeline = createSubjectBloomPipeline(renderer);
 const mewSubjectBloomPipeline = createSubjectBloomPipeline(mewForegroundRenderer);
 
+// ---------------------------------------------------------------------------
+// INVISIBLE CITIES "SYSTEM" TITLE MASK
+// ---------------------------------------------------------------------------
+// Canvas 2D draws the typography into an alpha mask. Three.js then uses that
+// mask in a full-screen shader. At black opacity 0 the letters become a window
+// into a captured background texture; at 1 they are solid near-black.
 const mewTitleOverlayCanvas = document.createElement('canvas');
 const maybeMewTitleOverlayContext = mewTitleOverlayCanvas.getContext('2d');
 if (!maybeMewTitleOverlayContext) {
@@ -905,6 +1263,8 @@ if (!maybeMewTitleOverlayContext) {
 }
 const mewTitleOverlayContext: CanvasRenderingContext2D = maybeMewTitleOverlayContext;
 const mewTitleOverlayTexture = new THREE.CanvasTexture(mewTitleOverlayCanvas);
+// Color textures and UI canvases are authored for display, so mark them sRGB.
+// Data textures (normals, depth, masks) usually remain linear/no-color-space.
 mewTitleOverlayTexture.colorSpace = THREE.SRGBColorSpace;
 mewTitleOverlayTexture.minFilter = THREE.LinearFilter;
 mewTitleOverlayTexture.magFilter = THREE.LinearFilter;
@@ -912,6 +1272,8 @@ const mewBackgroundCanvasTexture = new THREE.CanvasTexture(canvasElement);
 mewBackgroundCanvasTexture.minFilter = THREE.LinearFilter;
 mewBackgroundCanvasTexture.magFilter = THREE.LinearFilter;
 mewBackgroundCanvasTexture.generateMipmaps = false;
+// Mipmaps improve minification of static textures, but this texture changes
+// from the live canvas; regenerating its entire mip chain would waste time.
 const mewTitleOverlayScene = new THREE.Scene();
 const mewTitleOverlayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const mewTitleOverlayGeometry = new THREE.PlaneGeometry(2, 2);
@@ -936,9 +1298,15 @@ const mewTitleOverlayMaterial = new THREE.ShaderMaterial({
     varying vec2 vUv;
 
     void main() {
+      // Mask RGB is irrelevant; its alpha defines the letter silhouettes.
       vec4 mask = texture2D(uMask, vUv);
+      // The captured background is shifted so the colors visible inside the
+      // letters align with the composition beneath the HTML title.
       vec2 backgroundUv = vec2(vUv.x, clamp(vUv.y - 0.18, 0.0, 1.0));
       vec3 backgroundColor = texture2D(uBackground, backgroundUv).rgb;
+      // uBlackOpacity is an interpolation amount, not material opacity:
+      // 0 = exact background color in the stencil
+      // 1 = black title color in the stencil
       vec3 titleColor = mix(backgroundColor, vec3(0.043), uBlackOpacity);
       gl_FragColor = vec4(titleColor, mask.a);
     }
@@ -952,6 +1320,12 @@ mewTitleOverlayScene.add(new THREE.Mesh(mewTitleOverlayGeometry, mewTitleOverlay
 
 statusElement.textContent = 'Starting load';
 
+// ---------------------------------------------------------------------------
+// MUTABLE RUNTIME STATE AND REUSED MATH OBJECTS
+// ---------------------------------------------------------------------------
+// Values that change each frame live below. Reused Vector/Box/Raycaster objects
+// are intentional: allocating inside pointer and animation loops increases
+// garbage collection and can cause visible frame hitches.
 let animationFrame = 0;
 let shaderTime = 0;
 let dressTransitionFx = 0;
@@ -990,6 +1364,8 @@ const materialFadeOriginals = new WeakMap<THREE.Material, {
   transparent: boolean;
   depthWrite: boolean;
 }>();
+// WeakMap does not keep materials alive by itself. When a material is disposed
+// elsewhere, this bookkeeping entry can be garbage-collected automatically.
 const timer = new THREE.Timer();
 timer.connect(document);
 const zeroWind = new THREE.Vector3();
@@ -1004,12 +1380,16 @@ const holoOffsetDelta = new THREE.Vector3();
 const holoTargetAngularOffset = new THREE.Vector3();
 const holoAngularDelta = new THREE.Vector3();
 const photoPrintSpawnRaycaster = new THREE.Raycaster();
+// Raycasting converts a 2D pointer coordinate into a 3D ray from the camera.
+// Intersecting that ray with a plane produces a world-space spawn position.
 const photoPrintSpawnNdc = new THREE.Vector2();
 const photoPrintSpawnPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -PHOTO_PRINT_SPAWN_Z);
 const photoPrintSpawnPosition = new THREE.Vector3();
 const photoPrintDressRaycaster = new THREE.Raycaster();
 const photoPrintDressPointer = new THREE.Vector2();
 const photoPrintDressWorldBounds = new THREE.Box3();
+// Box3 is an axis-aligned bounding box (AABB). It is fast and conservative:
+// rotated geometry may occupy less area than its AABB, but never more.
 const photoPrintProjectionPoint = new THREE.Vector3();
 const photoPrintDressScreenBounds: ScreenSpaceBounds = {
   minX: 0,
@@ -1065,6 +1445,12 @@ applyCycloramaBackgroundPreset(cycloramaBackgroundSettings.preset);
 registerAssetServiceWorker();
 void start();
 
+// ---------------------------------------------------------------------------
+// ASSET LOADING, CACHING, AND DRESS ACTIVATION
+// ---------------------------------------------------------------------------
+// `start` is async because the first visible GLB must be ready before the
+// loading cover disappears. The animation loop starts only after that critical
+// path; secondary dresses and ghost versions load afterward in the background.
 async function start() {
   setLoadingOverlay('Loading selected dress');
   await loadDressAsset(dressAssetSettings.asset, true);
@@ -1102,6 +1488,8 @@ async function preloadRemainingFullDresses() {
 }
 
 async function preloadFullDressAsset(assetId: DressAssetId) {
+  // The promise map prevents two callers from fetching/parsing the same GLB at
+  // once. The completed cache prevents work after the promise resolves.
   if (fullDressCache.has(assetId) || fullDressPreloadPromises.has(assetId) || disposed) {
     return;
   }
@@ -1166,6 +1554,9 @@ async function loadDressAsset(assetId: DressAssetId, useLoadingOverlay = false) 
     return;
   }
 
+  // A monotonically increasing request token solves an asynchronous race:
+  // if the user requests Dress 1, then Dress 2 before Dress 1 finishes, the
+  // older request sees a stale token and is not allowed to replace Dress 2.
   const token = ++dressLoadToken;
   const asset = DRESS_ASSETS[assetId];
   dressAssetSettings.asset = assetId;
@@ -1247,6 +1638,9 @@ function createFullDressRecord(asset: DressAsset, loaded: LoadedDress): FullDres
   removeModelShadowArtifacts(loaded.root);
 
   const subjectPivot = new THREE.Group();
+  // The GLB may contain many nested nodes, bones, and meshes. Wrapping its root
+  // in one Group gives the application a stable place for theme transforms,
+  // crossfade visibility, and attached contact shadows.
   subjectPivot.name = `subject ${asset.id}`;
   subjectPivot.visible = false;
   subjectPivot.add(loaded.root);
@@ -1274,6 +1668,8 @@ function activateFullDress(record: FullDressRecord) {
   armBloomController = null;
 
   if (previous) {
+    // A Three.js object may have only one parent. Shadows move from the previous
+    // pivot to the new pivot so they always follow the active subject.
     if (contactShadow?.parent === previous.pivot) {
       previous.pivot.remove(contactShadow);
     }
@@ -1307,6 +1703,8 @@ function activateFullDress(record: FullDressRecord) {
   armBloomController = createArmBloomController(record.loaded.arms);
   record.opacity = 0;
   record.targetOpacity = 1;
+  // Crossfade opacity is applied recursively because one GLB can contain many
+  // materials. See `setObjectOpacity` for restoration of material flags.
   setObjectOpacity(record.pivot, 0);
   applyResponsiveCameraToCanvas();
   updateDebugState(record.loaded.bounds);
@@ -1417,6 +1815,9 @@ function updateFullDressFades(delta: number) {
       return;
     }
 
+    // Exponential smoothing is preferable to a fixed per-frame lerp amount:
+    // t = 1 - e^(-rate*dt) represents the same response in real time at
+    // different frame rates.
     const nextOpacity = THREE.MathUtils.lerp(
       record.opacity,
       record.targetOpacity,
@@ -1436,6 +1837,9 @@ function updateFullDressFades(delta: number) {
 }
 
 function pruneFullDressCache() {
+  // GLB meshes, textures, and shader programs occupy GPU memory even when not
+  // visible. This is a small least-recently-used cache: active stays, the most
+  // recently used inactive records stay up to the limit, older records dispose.
   const inactiveRecords = Array.from(fullDressCache.values())
     .filter((record) => record !== activeFullDress)
     .sort((a, b) => b.lastUsed - a.lastUsed);
@@ -1454,21 +1858,30 @@ function pruneFullDressCache() {
 }
 
 function animate(timestamp?: number) {
+  // -------------------------------------------------------------------------
+  // FRAME LOOP
+  // -------------------------------------------------------------------------
+  // requestAnimationFrame runs shortly before the browser paints. Never assume
+  // a fixed 1/60 second step: background tabs pause and high-refresh displays
+  // may call this 120+ times per second.
   timer.update(timestamp);
   const delta = timer.getDelta();
 
   if (!settings.freezeTime) {
+    // Accumulated seconds drive deterministic shader animation.
     shaderTime += delta;
   }
   cycloramaBackgroundUniforms.uCycloTime.value = shaderTime;
   infiniteBackdropUniforms.uBackdropTime.value = shaderTime;
 
+  // First update CPU-side state and shader uniforms...
   updateFullDressFades(delta);
   updatePointerWind(delta);
   updateSubjectMotion(delta);
   updatePhotoPrintParticles(delta);
   updateMewHoloSculptures(shaderTime, delta);
   updateThemeObjectVisibility();
+  // ...then upload the latest wind state to the dress material uniforms.
   windController?.update({
     time: shaderTime,
     windVector: pointerWind.wind,
@@ -1488,6 +1901,11 @@ function animate(timestamp?: number) {
   const objectPostThemeActive = invisibleCitiesActive || ivoryThemeActive;
   const objectBlurAmount = invisibleCitiesActive ? 0.018 : ivoryThemeActive ? 0.038 : 0;
 
+  // Bloom vocabulary:
+  // - threshold: minimum luminance that contributes,
+  // - strength: amount added back,
+  // - radius: blur spread.
+  // Dialectic explicitly uses zero strength so its fabric remains matte.
   bloomPass.threshold = invisibleCitiesActive
     ? 0.88
     : ivoryThemeActive
@@ -1532,6 +1950,10 @@ function animate(timestamp?: number) {
 
   controls.update(delta);
   if (subjectMotion.pivot) {
+    // SELECTIVE RENDERING:
+    // The base composer renders the environment with all subject objects hidden.
+    // We then restore and draw the subject sharply on top. This prevents global
+    // post effects from making the garment shiny or blurry.
     const hiddenSubjectObjects = getVisibleSubjectObjects();
     try {
       hiddenSubjectObjects.forEach((object) => {
@@ -1544,6 +1966,7 @@ function animate(timestamp?: number) {
       });
     }
     if (invisibleCitiesActive) {
+      // This theme uses the second transparent canvas and title-mask ordering.
       renderMewForeground(delta);
     } else {
       renderSharpSubjectOverlay(delta, {
@@ -1590,6 +2013,8 @@ function getVisibleSubjectObjects() {
 }
 
 function renderMewForeground(delta: number) {
+  // Visibility is saved and restored rather than inferred afterward. This makes
+  // the function safe when a theme intentionally hides one of these groups.
   const hiddenObjects: THREE.Object3D[] = [];
   [cycloramaMesh, infiniteBackdropMesh, holoAccentGroup, ivorySculptureGroup, photoPrintGroup, windArchiveDressShadow, dialecticHalftoneShadow, yellowBacking, paperRollMesh].forEach((object) => {
     if (object) {
@@ -1608,13 +2033,19 @@ function renderMewForeground(delta: number) {
 
   try {
     if (mewTitleBlackOpacity < 0.999) {
+      // CanvasTexture does not automatically know its source canvas changed.
+      // `needsUpdate` schedules a fresh GPU upload before the next draw.
       mewBackgroundCanvasTexture.needsUpdate = true;
     }
     mewForegroundRenderer.setRenderTarget(null);
     mewForegroundRenderer.autoClear = true;
+    // Clear color, depth, and stencil. Then disable automatic clears so several
+    // deliberate layers can accumulate in this one canvas.
     mewForegroundRenderer.clear(true, true, true);
     mewForegroundRenderer.autoClear = false;
     mewForegroundRenderer.render(mewTitleOverlayScene, mewTitleOverlayCamera);
+    // The title plane fills the screen and writes depth. Clearing only depth
+    // preserves its color while allowing the 3D dress to draw in front.
     mewForegroundRenderer.clearDepth();
     mewForegroundRenderer.render(scene, camera);
     renderSubjectBloom(delta, mewSubjectBloomPipeline);
@@ -1652,6 +2083,8 @@ function renderSharpSubjectOverlay(
   scene.background = null;
   try {
     if (options.direct) {
+      // Keep the already-rendered environment color, clear its depth values,
+      // and draw subject geometry as the nearest new layer.
       renderer.autoClear = false;
       renderer.clearDepth();
       renderer.render(scene, camera);
@@ -1682,6 +2115,8 @@ function renderSubjectBloom(delta: number, pipeline: SubjectBloomPipeline) {
   pipeline.bloomPass.threshold = DRESS_BLOOM_THRESHOLD;
   pipeline.composer.render(delta);
 
+  // Returning to the default framebuffer (`null`) is essential. Otherwise the
+  // overlay would be rendered back into its own offscreen input.
   const previousAutoClear = pipeline.renderer.autoClear;
   pipeline.renderer.setRenderTarget(null);
   pipeline.renderer.autoClear = false;
@@ -1694,6 +2129,8 @@ function updatePointerWind(delta: number) {
   const idleTime = pointerWind.hasPointer ? now - pointerWind.lastMoveTime : Number.POSITIVE_INFINITY;
 
   if (idleTime > 0.045) {
+    // `lerp(target, t)` mutates the vector toward the target. Exponential t
+    // produces a smooth physical-feeling decay rather than an abrupt stop.
     const targetFade = 1 - Math.exp(-delta * settings.fadeSpeed * 1.2);
     pointerWind.targetWind.lerp(zeroWind, targetFade);
   }
@@ -2678,6 +3115,9 @@ function isObjectWorldVisible(object: THREE.Object3D) {
 }
 
 function createArmBloomController(targets: THREE.Object3D | THREE.Object3D[]): ArmBloomController {
+  // Emissive light is a material property: it makes a surface appear to emit
+  // its own light color. It does not illuminate nearby meshes. Bloom may then
+  // spread sufficiently bright emissive pixels into a visible glow.
   const records: Array<{
     mesh: THREE.Mesh;
     originalMaterial: THREE.Material | THREE.Material[];
@@ -2743,24 +3183,34 @@ function updateArmGlowMaterial(material: THREE.Material, intensity: number) {
 }
 
 function addLighting(targetScene: THREE.Scene) {
+  // RectAreaLight approximates a large photography softbox. Larger area lights
+  // create broad, soft highlights, which suits fabric better than a tiny point
+  // source. RectAreaLight affects PBR materials but does not cast shadows here.
   const softbox = new THREE.RectAreaLight(0xf0e7d7, 2.2, 6.4, 7.2);
   softbox.position.set(-3.2, 3.45, 3.9);
   softbox.lookAt(0, 1.15, 0);
   targetScene.add(softbox);
 
+  // A DirectionalLight has parallel rays as if the source were infinitely far
+  // away. Position controls direction, not inverse-square distance falloff.
   const key = new THREE.DirectionalLight(0xf0e8da, 0.22);
   key.position.set(-3.6, 5.2, 4.8);
   key.castShadow = false;
   targetScene.add(key);
 
+  // The cool rear rim separates silhouette edges from the backdrop.
   const rim = new THREE.DirectionalLight(0xb8d1e8, 0.24);
   rim.position.set(4.2, 3.2, -3.2);
   targetScene.add(rim);
 
+  // PointLight radiates in every direction. The fourth argument is physical
+  // decay; 2 approximates inverse-square falloff, 2.6 falls off a little faster.
   const floorGlow = new THREE.PointLight(0xd4c1a5, 0.26, 7.2, 2.6);
   floorGlow.position.set(-1.85, 0.42, 1.65);
   targetScene.add(floorGlow);
 
+  // HemisphereLight supplies cheap sky/ground fill and prevents fully black
+  // unlit-facing regions. It is ambient directionality, not a shadow caster.
   targetScene.add(new THREE.HemisphereLight(0xc6d5df, 0x5f6d76, 0.5));
 }
 
@@ -2779,15 +3229,23 @@ function loadEditorialBackdropTexture(
     }),
   );
   texture.colorSpace = THREE.SRGBColorSpace;
+  // ClampToEdge avoids repeating the opposite edge when UVs reach the border.
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
+  // Anisotropic filtering improves textures viewed at a grazing angle. It costs
+  // texture bandwidth, so the value is capped at 4.
   texture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
   textureUniform.value = texture;
 }
 
 function addStudio(targetScene: THREE.Scene) {
+  // -------------------------------------------------------------------------
+  // STUDIO GEOMETRY AND AUTHORED SHADOW PLANES
+  // -------------------------------------------------------------------------
+  // This function constructs long-lived background objects. Theme switching
+  // generally toggles visibility/material modes rather than recreating them.
   loadEditorialBackdropTexture(
     '/editorial/sarmi-background-horizontal.png',
     infiniteBackdropUniforms.uGraphicTexture,
@@ -2821,6 +3279,8 @@ function addStudio(targetScene: THREE.Scene) {
   infiniteBackdropMaterial = trackMaterial(createInfiniteBackdropMaterial());
   infiniteBackdropMesh = new THREE.Mesh(trackGeometry(new THREE.PlaneGeometry(1, 1, 1, 1)), infiniteBackdropMaterial);
   infiniteBackdropMesh.name = 'infinite theme backdrop';
+  // The backdrop is parented to the camera. Its local transform therefore
+  // follows camera motion and it behaves like an infinitely distant 2D field.
   infiniteBackdropMesh.position.set(0, 0, -24);
   infiniteBackdropMesh.renderOrder = -1000;
   camera.add(infiniteBackdropMesh);
@@ -2840,6 +3300,9 @@ function addStudio(targetScene: THREE.Scene) {
   signalBlackGroup = addSignalBlackAccents(targetScene);
 
   cycloramaMaterial = trackMaterial(
+    // MeshStandardMaterial is physically based (PBR). Roughness 1 is matte,
+    // metalness 0 is dielectric/non-metal, and envMapIntensity controls the
+    // strength of RoomEnvironment reflections.
     new THREE.MeshStandardMaterial({
       color: 0xb5c8d2,
       map: cycloramaTexture,
@@ -2867,6 +3330,8 @@ function addStudio(targetScene: THREE.Scene) {
     trackGeometry(new THREE.PlaneGeometry(1, 1, 1, 1)),
     contactShadowMaterial,
   );
+  // PlaneGeometry is created upright in local XY. Rotating -π/2 around X lays
+  // it flat in XZ like a horizontal floor.
   contactShadow.rotation.x = -Math.PI / 2;
   contactShadow.position.set(0, 0.014, 0.18);
   contactShadow.scale.set(1.35, 0.5, 1);
@@ -2876,6 +3341,8 @@ function addStudio(targetScene: THREE.Scene) {
     trackMaterial(createSoftContactShadowMaterial(0x3f332b, 0.38)),
   );
   windArchiveDressShadow.name = 'wind archive dress shadow';
+  // This uses the same slope as the resting prints, visually claiming that all
+  // of them occupy one invisible plane.
   windArchiveDressShadow.rotation.x = PHOTO_PRINT_SURFACE_TILT;
   windArchiveDressShadow.position.set(0.16, PHOTO_PRINT_FLOOR_Y - 0.12, 0.24);
   windArchiveDressShadow.scale.set(2.2, 1.25, 1);
@@ -2888,9 +3355,37 @@ function addStudio(targetScene: THREE.Scene) {
     trackMaterial(createDialecticHalftoneShadowMaterial()),
   );
   dialecticHalftoneShadow.name = 'dialectic halftone floor shadow';
+
+  // DIALECTIC SHADOW TUNING
+  // -----------------------
+  // PlaneGeometry starts as a 1×1 square in local XY. We tip it toward the
+  // camera, scale it into a footprint, and attach it to the active dress pivot.
+  //
+  // rotation.x:
+  //   More negative approaches a horizontal floor (-PI/2 is perfectly flat).
+  //   Less negative makes the plane face the camera more directly. Keep it near
+  //   PHOTO_PRINT_SURFACE_TILT if it should agree with the Wind Archive floor.
+  //
+  // position.set(X, Y, Z):
+  //   X moves the entire shadow left/right.
+  //   Y moves it up/down in dress-local space. More negative Y creates a larger
+  //     visible gap below the hem; less negative Y tucks it under the dress.
+  //   Z moves it in depth. In this scene positive Z is toward the camera. On a
+  //     tilted plane, increasing Z generally projects more of the shadow below
+  //     the dress and strengthens the sense of floor depth.
+  //
+  // scale.set(width, depth, 1):
+  //   First value controls footprint width.
+  //   Second value controls how far the footprint extends along the floor.
+  //
+  // Because this mesh is later parented to the dress pivot, its transform is
+  // also multiplied by the current dress's pivot scale.
   dialecticHalftoneShadow.rotation.x = PHOTO_PRINT_SURFACE_TILT;
   dialecticHalftoneShadow.position.set(0.06, -0.27, 0.68);
   dialecticHalftoneShadow.scale.set(2, 1.3, 1);
+  // Transparent objects are sorted partly by renderOrder. A fixed positive
+  // order makes this draw after background geometry. The material does not
+  // write depth, so it cannot block the dress rendered above it.
   dialecticHalftoneShadow.renderOrder = 1;
   dialecticHalftoneShadow.visible = false;
   targetScene.add(dialecticHalftoneShadow);
@@ -2910,6 +3405,10 @@ function addStudio(targetScene: THREE.Scene) {
 }
 
 function createInfiniteBackdropMaterial() {
+  // One ShaderMaterial serves several themes. `uBackdropMode` selects a branch
+  // in the fragment shader. Reusing one material avoids shader recompilation
+  // during theme switches and keeps every background on the same full-screen
+  // camera-attached plane.
   return new THREE.ShaderMaterial({
     uniforms: infiniteBackdropUniforms,
     vertexShader: `
@@ -2932,11 +3431,15 @@ function createInfiniteBackdropMaterial() {
       uniform float uHeroStillAspect;
       varying vec2 vUv;
 
+      // These small helper functions are reusable shader building blocks.
+      // hash() creates repeatable noise from coordinates.
       float hash(vec2 value) {
         return fract(sin(dot(value, vec2(127.1, 311.7))) * 43758.5453123);
       }
 
       float softBlob(vec2 uv, vec2 center, vec2 scale, float radius, float feather) {
+        // This is a signed-distance-style mask. Scaling the delta makes an
+        // ellipse; smoothstep converts distance into a feathered 1→0 field.
         return smoothstep(radius + feather, radius - feather, length((uv - center) * scale));
       }
 
@@ -2948,10 +3451,14 @@ function createInfiniteBackdropMaterial() {
       }
 
       vec3 screenBlend(vec3 base, vec3 blend) {
+        // Screen blend is the inverse-multiply formula used in image editors.
+        // It can only brighten, making it useful for faded projected color.
         return 1.0 - (1.0 - base) * (1.0 - blend);
       }
 
       vec2 coverUv(vec2 uv, float imageAspect, float surfaceAspect) {
+        // Equivalent to CSS background-size: cover: crop one axis while
+        // preserving image proportions. Stretching would distort the archive.
         vec2 scale = vec2(1.0);
 
         if (surfaceAspect > imageAspect) {
@@ -2966,6 +3473,8 @@ function createInfiniteBackdropMaterial() {
       vec3 sampleEditorialPaper(vec2 uv) {
         vec4 sampled;
 
+        // Use a portrait source on narrow canvases so the crop retains useful
+        // content rather than throwing away most of a wide photograph.
         if (uBackdropAspect < 0.82) {
           sampled = texture2D(
             uGraphicVerticalTexture,
@@ -2978,6 +3487,9 @@ function createInfiniteBackdropMaterial() {
           );
         }
 
+        // The custom ShaderMaterial bypasses some automatic built-in material
+        // color conversion, so explicitly decode sRGB texture values to linear
+        // light before mixing them.
         return sRGBTransferEOTF(sampled).rgb;
       }
 
@@ -2994,6 +3506,8 @@ function createInfiniteBackdropMaterial() {
       }
 
       vec3 mewBackdrop(vec2 uv) {
+        // Warping UV before evaluating color fields makes their boundaries feel
+        // fluid. The actual screen geometry never moves.
         vec2 warped = uv;
         warped.x += sin(uv.y * 5.2 + uBackdropTime * 0.09) * 0.035;
         warped.y += sin(uv.x * 4.6 - uBackdropTime * 0.07) * 0.03;
@@ -3036,6 +3550,8 @@ function createInfiniteBackdropMaterial() {
         color += vec3(0.4, 1.0, 0.7) * shardB * 0.1;
         color += vec3(1.0, 0.24, 0.76) * shardC * 0.1;
 
+        // Quantizing UV into a fine grid creates stable grain cells. Slowly
+        // translating the seed makes them drift.
         float grain = hash(floor((uv + uBackdropTime * 0.006) * vec2(520.0, 390.0))) - 0.5;
         color += grain * 0.026;
         color = pow(max(color, vec3(0.0)), vec3(0.78));
@@ -3100,6 +3616,11 @@ function createInfiniteBackdropMaterial() {
         vec2 uv = vUv;
         vec3 color = blueBackdrop(uv);
 
+        // Float thresholds emulate an enum:
+        // 0 = Dialectic blue
+        // 1 = Invisible Cities color field
+        // 2 = Signal black
+        // 3 = Wind Archive paper
         if (uBackdropMode > 2.5) {
           color = windArchiveBackdrop(uv);
         } else if (uBackdropMode > 1.5) {
@@ -3111,6 +3632,8 @@ function createInfiniteBackdropMaterial() {
         gl_FragColor = vec4(color, 1.0);
       }
     `,
+    // This camera-attached plane is a background compositing layer, not an
+    // occluding 3D object, so it neither tests nor writes the depth buffer.
     depthTest: false,
     depthWrite: false,
     fog: false,
@@ -3717,11 +4240,19 @@ function updateMewHoloSculptures(time: number, delta: number) {
 }
 
 function initializePhotoPrintBursts(targetScene: THREE.Scene) {
+  // -------------------------------------------------------------------------
+  // WIND ARCHIVE PRINT-PARTICLE SYSTEM
+  // -------------------------------------------------------------------------
+  // This is a small CPU particle system. Each particle is a Group containing
+  // three ordinary meshes: shadow, white paper, and image. The CPU updates
+  // transforms; the GPU rasterizes their shared plane geometries.
   photoPrintGroup = new THREE.Group();
   photoPrintGroup.name = 'wind archive falling photo prints';
   photoPrintGroup.visible = cycloramaBackgroundSettings.preset === 'tabla-rasa';
   targetScene.add(photoPrintGroup);
 
+  // Geometry is shared by every print. Reusing BufferGeometry avoids creating
+  // duplicate GPU vertex/index buffers on every pointer movement.
   photoPrintCardGeometry = trackGeometry(new THREE.PlaneGeometry(PHOTO_PRINT_CARD_WIDTH, PHOTO_PRINT_CARD_HEIGHT));
   photoPrintImageGeometry = trackGeometry(new THREE.PlaneGeometry(PHOTO_PRINT_IMAGE_WIDTH, PHOTO_PRINT_IMAGE_HEIGHT));
   photoPrintShadowGeometry = trackGeometry(
@@ -3758,6 +4289,8 @@ function maybeSpawnPhotoPrintBurst(
     return;
   }
 
+  // Time throttling avoids a burst on every browser event; distance throttling
+  // ignores tiny hand jitter. Both are measured in normalized pointer space.
   const distance = lastPhotoPrintBurstPoint.distanceTo(pointerSample.set(x, y));
   const elapsed = now - lastPhotoPrintBurstTime;
   const movementSpeed = Math.hypot(movementX, movementY);
@@ -3778,7 +4311,11 @@ function maybeSpawnPhotoPrintBurst(
 }
 
 function isPointerOverVisibleDress(x: number, y: number) {
+  // Convert browser-normalized 0..1 coordinates to WebGL normalized device
+  // coordinates (-1..+1, with positive Y upward).
   photoPrintDressPointer.set(x * 2 - 1, y * 2 - 1);
+  // setFromCamera builds a world-space ray beginning at the camera and passing
+  // through this screen point.
   photoPrintDressRaycaster.setFromCamera(photoPrintDressPointer, camera);
 
   for (const record of fullDressCache.values()) {
@@ -3800,6 +4337,8 @@ function getPhotoPrintSpawnPosition(x: number, y: number, target: THREE.Vector3)
   photoPrintSpawnNdc.set(x * 2 - 1, y * 2 - 1);
   photoPrintSpawnRaycaster.setFromCamera(photoPrintSpawnNdc, camera);
 
+  // Ray-plane intersection turns the 2D pointer into a 3D point at the chosen
+  // spawn depth. The fallback handles a theoretically parallel ray.
   if (!photoPrintSpawnRaycaster.ray.intersectPlane(photoPrintSpawnPlane, target)) {
     target.set((x - 0.5) * 4.6, 1.8 + (y - 0.5) * 2.2, PHOTO_PRINT_SPAWN_Z);
   }
@@ -3808,6 +4347,8 @@ function getPhotoPrintSpawnPosition(x: number, y: number, target: THREE.Vector3)
   const visibleHalfHeight = Math.tan(THREE.MathUtils.degToRad(camera.fov) * 0.5) * spawnDepth;
   const visibleHalfWidth = visibleHalfHeight * camera.aspect;
   target.x = THREE.MathUtils.clamp(target.x, -visibleHalfWidth * 0.86, visibleHalfWidth * 0.86);
+  // Project back to normalized screen space so prints can be biased toward the
+  // side fields instead of appearing on top of the central dress.
   photoPrintProjectionPoint.copy(target).project(camera);
   const desiredScreenX = x < 0.5 ? -0.66 : 0.66;
   target.x += (desiredScreenX - photoPrintProjectionPoint.x) * visibleHalfWidth;
@@ -3824,6 +4365,8 @@ function spawnPhotoPrint(position: THREE.Vector3, movementX: number, movementY: 
   const root = new THREE.Group();
   const seed = Math.random() * Math.PI * 2;
   const layer = photoPrintLayerCounter++;
+  // Reserve three consecutive render-order slots per print. Later prints have
+  // higher slots and therefore stack cleanly above earlier prints.
   const layerRenderOrder = 10 + layer * 3;
   const baseScale = canvasElement.clientWidth < 420
     ? randomBetween(0.46, 0.68)
@@ -3845,6 +4388,8 @@ function spawnPhotoPrint(position: THREE.Vector3, movementX: number, movementY: 
   root.scale.setScalar(baseScale);
   root.renderOrder = layerRenderOrder;
 
+  // MeshBasicMaterial ignores lights. That keeps print paper and photographs
+  // visually consistent as they cross differently lit regions of the scene.
   const shadowMaterial = new THREE.MeshBasicMaterial({
     color: 0x111111,
     transparent: true,
@@ -3885,6 +4430,8 @@ function spawnPhotoPrint(position: THREE.Vector3, movementX: number, movementY: 
   const windX = clampSigned(movementX * 0.064, 1.45);
   const windY = clampSigned(movementY * 0.058, 0.94);
   const lift = randomBetween(0.36, 0.72) + Math.max(0, windY * 0.18);
+  // Quaternions compose rotations without Euler-order ambiguity. First tip the
+  // card onto the common floor, then rotate it within that plane.
   const restQuaternion = new THREE.Quaternion()
     .setFromAxisAngle(new THREE.Vector3(1, 0, 0), PHOTO_PRINT_SURFACE_TILT)
     .multiply(
@@ -3934,11 +4481,15 @@ function updatePhotoPrintParticles(delta: number) {
   const hasProtectedDressArea = getVisibleDressScreenBounds(photoPrintDressScreenBounds);
 
   for (let index = photoPrintParticles.length - 1; index >= 0; index -= 1) {
+    // Iterate backward because removing an item splices the array. Forward
+    // iteration would skip the next particle after a removal.
     const particle = photoPrintParticles[index];
     particle.age += delta;
 
     const floorSettled = particle.floorContactAge !== null;
     if (particle.discarding) {
+      // Semi-implicit Euler integration: update velocity from gravity, then
+      // update position from the new velocity.
       particle.velocity.y -= PHOTO_PRINT_GRAVITY * delta;
       particle.root.position.addScaledVector(particle.velocity, delta);
       particle.root.rotation.x += particle.angularVelocity.x * delta;
@@ -3961,6 +4512,8 @@ function updatePhotoPrintParticles(delta: number) {
       particle.root.position.addScaledVector(particle.velocity, delta);
 
       if (particle.root.position.y <= particle.floorY) {
+        // Resolve collision against an invisible horizontal coordinate: prevent
+        // penetration and cancel only the downward component.
         particle.root.position.y = particle.floorY;
         if (particle.floorContactAge === null) {
           particle.floorContactAge = 0;
@@ -3978,6 +4531,8 @@ function updatePhotoPrintParticles(delta: number) {
         particle.velocity.y = 0;
         particle.root.position.y = particle.floorY;
         particle.angularVelocity.multiplyScalar(Math.exp(-delta * 4.8));
+        // Spherical linear interpolation takes the shortest smooth path between
+        // orientations. Exponential t keeps settling speed frame-rate neutral.
         particle.root.quaternion.slerp(particle.restQuaternion, 1 - Math.exp(-delta * 7.2));
       } else {
         particle.velocity.multiplyScalar(Math.exp(-delta * 0.08));
@@ -3999,6 +4554,8 @@ function updatePhotoPrintParticles(delta: number) {
       && doesPhotoPrintOverlapScreenBounds(particle.root, photoPrintDressScreenBounds);
 
     if (overlapsDress && !particle.discarding) {
+      // "Do not obscure the garment" is an editorial screen-space rule. Convert
+      // an offending print into a disposable falling particle.
       const outwardDirection = particle.root.position.x >= 0 ? 1 : -1;
       particle.discarding = true;
       particle.floorContactAge = null;
@@ -4053,6 +4610,8 @@ function expandScreenSpaceBounds(bounds: ScreenSpaceBounds, point: THREE.Vector3
 }
 
 function getVisibleDressScreenBounds(target: ScreenSpaceBounds) {
+  // This collision is intentionally screen-space, not physical world-space:
+  // two separated 3D objects can still overlap in the final camera view.
   resetScreenSpaceBounds(target);
   camera.updateMatrixWorld();
   let hasBounds = false;
@@ -4062,6 +4621,8 @@ function getVisibleDressScreenBounds(target: ScreenSpaceBounds) {
       continue;
     }
 
+    // Box3 is a world-space axis-aligned bounding box. Projecting its eight
+    // corners produces a conservative 2D rectangle around the dress.
     photoPrintDressWorldBounds.setFromObject(record.loaded.dress);
     if (photoPrintDressWorldBounds.isEmpty()) {
       continue;
@@ -4087,6 +4648,8 @@ function getVisibleDressScreenBounds(target: ScreenSpaceBounds) {
 }
 
 function doesPhotoPrintOverlapScreenBounds(root: THREE.Group, dressBounds: ScreenSpaceBounds) {
+  // Transform the card's four local corners through its complete world matrix,
+  // project them through the camera, then perform a rectangle overlap test.
   resetScreenSpaceBounds(photoPrintCardScreenBounds);
   root.updateMatrixWorld(true);
 
@@ -4119,6 +4682,8 @@ function removePhotoPrintParticle(index: number) {
   if (particle.root.parent) {
     particle.root.parent.remove(particle.root);
   }
+  // Removing from the scene does not free GPU memory. Per-particle materials
+  // must be disposed explicitly; geometry is shared and remains alive.
   particle.materials.forEach(({ material }) => material.dispose());
   stageElement!.dataset.photoPrintCount = String(photoPrintParticles.length);
 }
@@ -4323,6 +4888,11 @@ function createIvoryMarbleTexture() {
 }
 
 function createCycloramaGeometry() {
+  // A cyclorama is a floor that curves smoothly into a wall, eliminating a
+  // visible horizon seam. We build one custom BufferGeometry by:
+  // 1. defining a 2D Y/Z profile (floor → quarter-circle → wall),
+  // 2. sweeping that profile across X,
+  // 3. connecting neighboring samples into triangles.
   const xSegments = 36;
   const floorSegments = 10;
   const curveSegments = 18;
@@ -4350,6 +4920,9 @@ function createCycloramaGeometry() {
 
   const profileDistances = getProfileDistances(profile);
   const surfaceLength = profileDistances[profileDistances.length - 1] || 1;
+  // Position attribute: three floats per vertex.
+  // UV attribute: two floats per vertex.
+  // Index: integers describing which three vertices form each triangle.
   const positions: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];
@@ -4378,6 +4951,8 @@ function createCycloramaGeometry() {
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
+  // Lighting needs normals. Computing them averages adjacent triangle normals,
+  // which makes the curved floor-to-wall transition shade smoothly.
   geometry.computeVertexNormals();
 
   return geometry;
@@ -4388,6 +4963,10 @@ function getCycloramaRepeatY(imageAspect: number) {
 }
 
 function createSoftContactShadowMaterial(color: number, opacity: number) {
+  // This is a "blob shadow": an authored alpha field on a plane, not a shadow
+  // calculated by tracing light visibility. Advantages are stable softness,
+  // zero shadow-map acne, and exact art direction. The tradeoff is that it does
+  // not respond automatically when the light or silhouette changes.
   return new THREE.ShaderMaterial({
     uniforms: {
       uColor: { value: new THREE.Color(color) },
@@ -4411,13 +4990,22 @@ function createSoftContactShadowMaterial(color: number, opacity: number) {
       }
 
       void main() {
+        // Remap UV 0..1 to a centered -1..+1 coordinate system. This makes
+        // ellipse formulas symmetrical around zero.
         vec2 p = vUv * 2.0 - 1.0;
+        // Each length(vec2(p.x * A, p.y * B)) is an elliptical distance
+        // field. Different ellipses are layered to suggest both tight contact
+        // and a broad, diffused cast shadow.
         float broad = smoothstep(1.0, 0.08, length(vec2(p.x * 0.72, p.y * 1.48)));
         float contact = smoothstep(0.46, 0.02, length(vec2((p.x - 0.08) * 1.25, p.y * 2.3)));
         float sideFalloff = smoothstep(1.0, 0.26, length(vec2((p.x + 0.18) * 0.92, p.y * 1.72)));
+        // Quantized noise varies alpha in larger paper-like cells instead of
+        // producing a perfectly digital gradient.
         float paperBreakup = mix(0.9, 1.06, hash(floor(vUv * 14.0)));
         float alpha = (broad * 0.7 + contact * 0.55 + sideFalloff * 0.22) * paperBreakup * uOpacity;
 
+        // discard means this fragment writes no color and no depth at all.
+        // It avoids processing nearly invisible transparent fringe pixels.
         if (alpha < 0.002) {
           discard;
         }
@@ -4432,6 +5020,9 @@ function createSoftContactShadowMaterial(color: number, opacity: number) {
 }
 
 function createDialecticHalftoneShadowMaterial() {
+  // This shader converts a smooth shadow-density field into a grid of square
+  // halftone marks. Classic print halftoning represents darker values with
+  // larger dots. Here the marks are squares to match the supplied reference.
   return new THREE.ShaderMaterial({
     vertexShader: `
       varying vec2 vUv;
@@ -4450,26 +5041,57 @@ function createDialecticHalftoneShadowMaterial() {
 
       void main() {
         vec2 p = vUv * 2.0 - 1.0;
+
+        // SHADOW SHAPE CONTROLS
+        // ---------------------
+        // These values change the internal ink shape, not the mesh's distance
+        // from the dress. For physical placement, edit the position/rotation/
+        // scale documented where dialecticHalftoneShadow is constructed.
+        //
+        // X/Y additions move each ellipse within the plane's UV space.
+        // X/Y multipliers compress or stretch it.
         float broadDistance = length(vec2((p.x + 0.04) * 1.04, (p.y + 0.12) * 0.9));
         float contactDistance = length(vec2((p.x - 0.08) * 1.4, (p.y - 0.92) * 2.0));
+
+        // Subtracting smoothstep from 1 makes values dense at the center and
+        // fade to zero at the edge. The contact field concentrates ink near the
+        // hem while the broad field creates the larger floor footprint.
         float broad = 1.0 - smoothstep(0.5, 1.0, broadDistance);
         float contact = 1.0 - smoothstep(0.1, 0.54, contactDistance);
         float density = clamp(broad * 0.68 + contact * 0.62, 0.0, 1.0);
 
+        // HALFTONE GRID CONTROLS
+        // ----------------------
+        // Larger gridScale values create more, smaller marks. The unequal X/Y
+        // counts compensate for the footprint's rectangular aspect.
         vec2 gridScale = vec2(39.0, 22.0);
+        // floor() assigns every UV to an integer cell ID. fract() yields the
+        // position inside that cell. Subtracting 0.5 centers it, and abs()
+        // makes distance symmetric across all four quadrants.
         vec2 grid = floor(vUv * gridScale);
         vec2 cell = abs(fract(vUv * gridScale) - 0.5);
         float variation = hash(grid);
+
+        // Darker density => larger square. Random variation prevents a sterile
+        // perfectly uniform screen while keeping every cell stable over time.
         float squareSize = mix(0.015, 0.4, density) * mix(0.9, 1.06, variation);
 
+        // For a square, max(abs(x), abs(y)) is the distance to its boundary.
+        // Fragments outside the chosen half-size are discarded, leaving only
+        // the printed mark. The density test removes the ellipse's faint tail.
         if (density < 0.05 || max(cell.x, cell.y) > squareSize) {
           discard;
         }
 
+        // RGB is a nearly black blue ink. Alpha still varies with density, so
+        // the center reads heavier without becoming a solid digital shape.
         gl_FragColor = vec4(vec3(0.025, 0.055, 0.075), mix(0.22, 0.56, density));
       }
     `,
     transparent: true,
+    // The subject is deliberately composited after the background. Disabling
+    // the test makes the footprint independent of the backdrop's depth, while
+    // disabling writes guarantees it cannot hide the subsequently drawn dress.
     depthTest: false,
     depthWrite: false,
     side: THREE.DoubleSide,
@@ -4849,8 +5471,17 @@ function updateDressUrl(assetId: DressAssetId) {
 }
 
 function patchCycloramaBackgroundMaterial(material: THREE.Material) {
+  // `onBeforeCompile` is an advanced middle ground between built-in materials
+  // and writing a complete ShaderMaterial. Three.js first generates its normal
+  // MeshStandard/Basic shader; this callback injects uniforms and replaces
+  // selected `#include` chunks. We retain built-in lighting/fog/tone behavior
+  // while adding custom theme color.
   material.onBeforeCompile = (shader) => {
+    // Uniform objects are shared, so changing their `.value` later updates every
+    // material compiled with this patch.
     Object.assign(shader.uniforms, cycloramaBackgroundUniforms);
+    // String replacement depends on stable Three.js shader chunk names. After a
+    // major Three.js upgrade, verify these anchors still exist.
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <common>',
       `#include <common>
@@ -5023,10 +5654,14 @@ function setMaterialOpacity(material: THREE.Material, opacity: number) {
   }
 
   if (opacity >= 0.999) {
+    // Restore exactly what the GLB supplied rather than assuming all materials
+    // began opaque/depth-writing.
     material.opacity = original.opacity;
     material.transparent = original.transparent;
     material.depthWrite = original.depthWrite;
   } else {
+    // Transparent crossfading materials must not write depth: an almost
+    // invisible outgoing mesh writing depth could punch holes in the incoming.
     material.opacity = original.opacity * opacity;
     material.transparent = true;
     material.depthWrite = false;
@@ -5041,6 +5676,8 @@ function syncCinematicFinishPass() {
 }
 
 function syncCinematicUniforms(pass: ShaderPass) {
+  // Updating uniforms mutates small values already attached to the compiled GPU
+  // program; it does not rebuild the shader or composer.
   const uniforms = pass.uniforms as Record<string, THREE.IUniform<number | THREE.Vector2>>;
   const holoEditorialActive = isHoloScrollTheme();
   uniforms.uTime.value = shaderTime;
@@ -5119,6 +5756,9 @@ function disposeDressThumbnailRecord(record: DressThumbnailRecord) {
 }
 
 function disposeObjectResources(root: THREE.Object3D, options: { disposeMaterials?: boolean } = {}) {
+  // JavaScript garbage collection cannot directly free WebGL allocations.
+  // `.dispose()` tells Three.js to delete GPU buffers, textures, and programs.
+  // Sets prevent disposing a shared geometry/material more than once.
   const disposeMaterials = options.disposeMaterials ?? true;
   const geometries = new Set<THREE.BufferGeometry>();
   const materials = new Set<THREE.Material>();
@@ -5161,6 +5801,8 @@ function collectMaterialTextures(material: THREE.Material, textures: Set<THREE.T
 }
 
 function trackGeometry<T extends THREE.BufferGeometry>(geometry: T): T {
+  // Tracking helpers centralize ownership for scene-lifetime resources. They
+  // return the same object, so they compose neatly inside constructors.
   disposableGeometries.push(geometry);
   return geometry;
 }
@@ -5176,6 +5818,8 @@ function trackTexture<T extends THREE.Texture>(texture: T): T {
 }
 
 function queueCanvasResize() {
+  // ResizeObserver/window events may fire repeatedly in one browser frame.
+  // Coalescing through requestAnimationFrame performs one expensive resize.
   if (queuedResizeFrame) {
     window.cancelAnimationFrame(queuedResizeFrame);
   }
@@ -5195,16 +5839,22 @@ function resize() {
   const height = Math.max(1, Math.round(canvasBounds.height || window.innerHeight));
 
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
+  // `false` means do not overwrite CSS width/height; layout owns CSS size while
+  // the renderer controls the internal drawing-buffer resolution.
   renderer.setSize(width, height, false);
   mewForegroundRenderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
   mewForegroundRenderer.setSize(width, height, false);
   updateMewTitleOverlayTexture();
+  // Every offscreen render target must match the canvas or it will be stretched,
+  // blurry, and sampled with incorrect texel sizes.
   composer.setSize(width, height);
   subjectFxComposer.setSize(width, height);
   sharpSubjectComposer.setSize(width, height);
   subjectBloomPipeline.composer.setSize(width, height);
   mewSubjectBloomPipeline.composer.setSize(width, height);
   camera.aspect = width / height;
+  // applyResponsiveCamera updates fov/position and ultimately the projection
+  // matrix. Changing aspect without a projection update distorts the view.
   applyResponsiveCamera(width, height);
   updateInfiniteBackdropScale();
   scheduleGhostDressLoads();
@@ -5607,6 +6257,9 @@ function renderSignalGraphNodes() {
 }
 
 function applyResponsiveCamera(width: number, height: number) {
+  // Camera responsiveness preserves composition in 3D rather than merely
+  // resizing the canvas. Portrait layouts need a wider vertical field of view
+  // and greater distance so the dress remains inside frame.
   const portrait = width < 720 || height > width * 1.12;
   applyThemeSubjectPlacement();
 
@@ -5619,6 +6272,8 @@ function applyResponsiveCamera(width: number, height: number) {
   const dialecticZoom = dialectic ? (portrait ? 1.06 : 1.12) : 1;
   const ivoryLift = ivory ? 0.13 : 0;
 
+  // FOV is vertical degrees. A larger value sees more but exaggerates
+  // perspective. Moving the camera back also sees more, with less distortion.
   camera.fov = portrait ? 50 : 38;
   subjectMotion.baseCameraPosition.set(
     portrait ? 0.12 : 0.22,
@@ -5645,6 +6300,9 @@ function applyThemeSubjectPlacement() {
   const lift = invisibleCities ? (isMobileViewport() ? 0 : 0.42) : 0;
 
   fullDressCache.forEach((record) => {
+    // The GLB loader already normalizes source dimensions. This final scale is
+    // theme composition, and `dialecticScale` compensates for perceived
+    // silhouette differences. Both current dresses use 1 in Dialectic.
     const scale = invisibleCities
       ? INVISIBLE_CITIES_SUBJECT_SCALE
       : cycloramaBackgroundSettings.preset === 'tabla-rasa'
@@ -5660,6 +6318,8 @@ function applyThemeSubjectPlacement() {
 function applySafeCameraMotion() {
   const baseCameraY = subjectMotion.baseCameraPosition.y;
   const baseFocusY = subjectMotion.baseFocusTarget.y;
+  // Focus→camera is a view-offset vector. Scaling it changes distance without
+  // changing the intended viewing direction.
   const baseViewOffset = subjectMotion.baseCameraPosition.clone().sub(subjectMotion.baseFocusTarget);
   const backAmount = getBackViewAmount(subjectMotion.yaw);
   const distanceMultiplier = THREE.MathUtils.lerp(1, CAMERA_BACK_DISTANCE_MULTIPLIER, backAmount);
@@ -5679,6 +6339,7 @@ function applySafeCameraMotion() {
     baseFocusY + FOCUS_MAX_LIFT,
   );
   controls.target.copy(focusTarget);
+  // OrbitControls writes the camera orientation that looks toward this target.
   controls.update();
 }
 
@@ -5796,10 +6457,18 @@ buildIvoryPortal();
 buildSignalDiptych();
 
 function dispose() {
+  // -------------------------------------------------------------------------
+  // TEARDOWN
+  // -------------------------------------------------------------------------
+  // JavaScript listeners/callbacks keep objects reachable, and WebGL resources
+  // live outside normal garbage collection. Complete teardown matters for Vite
+  // hot reload, remounting, navigation, and long editing sessions.
   if (disposed) {
     return;
   }
 
+  // Idempotence: after this flag flips, asynchronous loads and repeated unload
+  // paths are prevented from operating on released objects.
   disposed = true;
   window.cancelAnimationFrame(animationFrame);
   if (ghostLoadTimeout) {
