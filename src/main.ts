@@ -259,6 +259,19 @@ type SubjectBloomPipeline = {
   overlayMaterial: THREE.ShaderMaterial;
 };
 
+type MewForegroundPipeline = {
+  renderer: THREE.WebGLRenderer;
+  pmrem: THREE.PMREMGenerator;
+  environment: THREE.Texture;
+  subjectBloomPipeline: SubjectBloomPipeline;
+  titleBackgroundComposer: EffectComposer;
+  titleBackgroundBloomPass: UnrealBloomPass;
+  titleBackgroundBokehPass: BokehPass;
+  titleBackgroundBokehUniforms: Record<string, THREE.IUniform<number>>;
+  titleBackgroundCinematicFinishPass: ShaderPass;
+  titleBackgroundAlphaFeatherPass: ShaderPass;
+};
+
 type CycloramaBackgroundSettings = {
   preset: CycloramaBackgroundPresetId;
 };
@@ -1043,20 +1056,10 @@ renderer.shadowMap.enabled = false;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 
 // Invisible Cities uses a second transparent canvas because its title mask and
-// subject have a special layer order relative to HTML. A renderer cannot render
-// into two canvases; therefore the second canvas needs its own renderer/context.
-const mewForegroundRenderer = new THREE.WebGLRenderer({
-  canvas: mewForegroundCanvasElement,
-  alpha: true,
-  antialias: true,
-  powerPreference: 'high-performance',
-});
-mewForegroundRenderer.setClearColor(0x000000, 0);
-mewForegroundRenderer.setPixelRatio(getRenderPixelRatio());
-mewForegroundRenderer.toneMapping = THREE.ACESFilmicToneMapping;
-mewForegroundRenderer.toneMappingExposure = 0.64;
-mewForegroundRenderer.outputColorSpace = THREE.SRGBColorSpace;
-mewForegroundRenderer.shadowMap.enabled = false;
+// subject have a special layer order relative to HTML. It is intentionally
+// lazy: allocating a second renderer and its targets for every mobile theme
+// exhausts WebKit's budget even when Invisible Cities is never shown.
+let mewForegroundPipeline: MewForegroundPipeline | null = null;
 
 // PBR materials need believable environment reflections even when the scene has
 // no photographed HDRI. RoomEnvironment procedurally supplies one. PMREM
@@ -1064,8 +1067,6 @@ mewForegroundRenderer.shadowMap.enabled = false;
 // reflections and glossy materials sample sharper reflections.
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-const mewForegroundPmrem = new THREE.PMREMGenerator(mewForegroundRenderer);
-const mewForegroundEnvironment = mewForegroundPmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
 // OrbitControls is retained for its damped camera-target math, but direct user
 // pan/rotate/zoom are disabled. The app drives the camera programmatically.
@@ -1262,7 +1263,6 @@ function createSubjectBloomPipeline(targetRenderer: THREE.WebGLRenderer): Subjec
 }
 
 const subjectBloomPipeline = createSubjectBloomPipeline(renderer);
-const mewSubjectBloomPipeline = createSubjectBloomPipeline(mewForegroundRenderer);
 
 // ---------------------------------------------------------------------------
 // INVISIBLE CITIES "SYSTEM" TITLE MASK
@@ -1289,39 +1289,12 @@ const mewTitleOverlayTexture = new THREE.CanvasTexture(mewTitleOverlayCanvas);
 mewTitleOverlayTexture.colorSpace = THREE.SRGBColorSpace;
 mewTitleOverlayTexture.minFilter = THREE.LinearFilter;
 mewTitleOverlayTexture.magFilter = THREE.LinearFilter;
-// The title samples the same processed background as the main canvas. Its
-// composer belongs to the foreground renderer, so no WebGL canvas is ever
-// uploaded into a different WebGL context on Mobile Safari.
-const mewTitleBackgroundComposer = new EffectComposer(mewForegroundRenderer);
-mewTitleBackgroundComposer.renderToScreen = false;
-mewTitleBackgroundComposer.addPass(new RenderPass(scene, camera));
-const mewTitleBackgroundBloomPass = new UnrealBloomPass(
-  new THREE.Vector2(1, 1),
-  BLOOM_BASE_STRENGTH,
-  BLOOM_BASE_RADIUS,
-  BLOOM_THRESHOLD,
-);
-mewTitleBackgroundComposer.addPass(mewTitleBackgroundBloomPass);
-const mewTitleBackgroundBokehPass = new BokehPass(scene, camera, {
-  focus: camera.position.distanceTo(focusTarget),
-  aperture: 0.013,
-  maxblur: 0.028,
-});
-const mewTitleBackgroundBokehUniforms = mewTitleBackgroundBokehPass.uniforms as Record<string, THREE.IUniform<number>>;
-mewTitleBackgroundBokehPass.enabled = false;
-mewTitleBackgroundComposer.addPass(mewTitleBackgroundBokehPass);
-const mewTitleBackgroundCinematicFinishPass = new ShaderPass(CINEMATIC_FINISH_SHADER);
-mewTitleBackgroundComposer.addPass(mewTitleBackgroundCinematicFinishPass);
-const mewTitleBackgroundAlphaFeatherPass = new ShaderPass(MEW_ALPHA_FEATHER_SHADER);
-mewTitleBackgroundAlphaFeatherPass.enabled = false;
-mewTitleBackgroundComposer.addPass(mewTitleBackgroundAlphaFeatherPass);
-mewTitleBackgroundComposer.addPass(new OutputPass());
 const mewTitleOverlayScene = new THREE.Scene();
 const mewTitleOverlayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const mewTitleOverlayGeometry = new THREE.PlaneGeometry(2, 2);
 const mewTitleOverlayMaterial = new THREE.ShaderMaterial({
   uniforms: {
-    uBackground: { value: mewTitleBackgroundComposer.readBuffer.texture },
+    uBackground: { value: null },
     uMask: { value: mewTitleOverlayTexture },
     uBlackOpacity: { value: 1 },
   },
@@ -1395,6 +1368,101 @@ const mewTitleOverlayMaterial = new THREE.ShaderMaterial({
   toneMapped: false,
 });
 mewTitleOverlayScene.add(new THREE.Mesh(mewTitleOverlayGeometry, mewTitleOverlayMaterial));
+
+function ensureMewForegroundPipeline() {
+  if (mewForegroundPipeline) {
+    return mewForegroundPipeline;
+  }
+
+  const renderer = new THREE.WebGLRenderer({
+    canvas: mewForegroundCanvasElement,
+    alpha: true,
+    antialias: true,
+    powerPreference: 'high-performance',
+  });
+  renderer.setClearColor(0x000000, 0);
+  renderer.setPixelRatio(getRenderPixelRatio());
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 0.64;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.shadowMap.enabled = false;
+
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  const subjectBloomPipeline = createSubjectBloomPipeline(renderer);
+  const titleBackgroundComposer = new EffectComposer(renderer);
+  titleBackgroundComposer.renderToScreen = false;
+  titleBackgroundComposer.addPass(new RenderPass(scene, camera));
+  const titleBackgroundBloomPass = new UnrealBloomPass(
+    new THREE.Vector2(1, 1),
+    BLOOM_BASE_STRENGTH,
+    BLOOM_BASE_RADIUS,
+    BLOOM_THRESHOLD,
+  );
+  titleBackgroundComposer.addPass(titleBackgroundBloomPass);
+  const titleBackgroundBokehPass = new BokehPass(scene, camera, {
+    focus: camera.position.distanceTo(focusTarget),
+    aperture: 0.013,
+    maxblur: 0.028,
+  });
+  const titleBackgroundBokehUniforms = titleBackgroundBokehPass.uniforms as Record<string, THREE.IUniform<number>>;
+  titleBackgroundBokehPass.enabled = false;
+  titleBackgroundComposer.addPass(titleBackgroundBokehPass);
+  const titleBackgroundCinematicFinishPass = new ShaderPass(CINEMATIC_FINISH_SHADER);
+  titleBackgroundComposer.addPass(titleBackgroundCinematicFinishPass);
+  const titleBackgroundAlphaFeatherPass = new ShaderPass(MEW_ALPHA_FEATHER_SHADER);
+  titleBackgroundAlphaFeatherPass.enabled = false;
+  titleBackgroundComposer.addPass(titleBackgroundAlphaFeatherPass);
+  titleBackgroundComposer.addPass(new OutputPass());
+
+  mewForegroundPipeline = {
+    renderer,
+    pmrem,
+    environment,
+    subjectBloomPipeline,
+    titleBackgroundComposer,
+    titleBackgroundBloomPass,
+    titleBackgroundBokehPass,
+    titleBackgroundBokehUniforms,
+    titleBackgroundCinematicFinishPass,
+    titleBackgroundAlphaFeatherPass,
+  };
+  mewTitleOverlayMaterial.uniforms.uBackground.value = titleBackgroundComposer.readBuffer.texture;
+  mewTitleOverlayMaterial.uniforms.uBlackOpacity.value = mewTitleBlackOpacity;
+  mewTitleOverlayTexture.needsUpdate = true;
+
+  const canvasBounds = canvasElement.getBoundingClientRect();
+  resizeMewForegroundPipeline(
+    mewForegroundPipeline,
+    Math.max(1, Math.round(canvasBounds.width || window.innerWidth)),
+    Math.max(1, Math.round(canvasBounds.height || window.innerHeight)),
+  );
+  return mewForegroundPipeline;
+}
+
+function disposeMewForegroundPipeline() {
+  const pipeline = mewForegroundPipeline;
+  if (!pipeline) {
+    return;
+  }
+
+  pipeline.subjectBloomPipeline.composer.dispose();
+  pipeline.subjectBloomPipeline.bloomPass.dispose();
+  pipeline.subjectBloomPipeline.overlayMaterial.dispose();
+  pipeline.subjectBloomPipeline.overlayGeometry.dispose();
+  pipeline.titleBackgroundComposer.dispose();
+  pipeline.titleBackgroundBloomPass.dispose();
+  pipeline.titleBackgroundBokehPass.dispose();
+  pipeline.titleBackgroundCinematicFinishPass.dispose();
+  pipeline.titleBackgroundAlphaFeatherPass.dispose();
+  pipeline.environment.dispose();
+  pipeline.pmrem.dispose();
+  pipeline.renderer.dispose();
+  mewForegroundPipeline = null;
+  mewTitleOverlayMaterial.uniforms.uBackground.value = null;
+  mewForegroundCanvasElement.width = 1;
+  mewForegroundCanvasElement.height = 1;
+}
 
 statusElement.textContent = 'Starting load';
 
@@ -2029,26 +2097,35 @@ function animate(timestamp?: number) {
     : signalThemeActive
     ? 0.05
     : BLOOM_BASE_RADIUS + pointerWind.activity * BLOOM_WIND_RADIUS;
-  mewTitleBackgroundBloomPass.threshold = bloomPass.threshold;
-  mewTitleBackgroundBloomPass.strength = bloomPass.strength;
-  mewTitleBackgroundBloomPass.radius = bloomPass.radius;
+  const mewPipeline = mewForegroundPipeline;
+  if (mewPipeline) {
+    mewPipeline.titleBackgroundBloomPass.threshold = bloomPass.threshold;
+    mewPipeline.titleBackgroundBloomPass.strength = bloomPass.strength;
+    mewPipeline.titleBackgroundBloomPass.radius = bloomPass.radius;
+  }
   bokehPass.enabled = objectPostThemeActive;
-  mewTitleBackgroundBokehPass.enabled = bokehPass.enabled;
+  if (mewPipeline) {
+    mewPipeline.titleBackgroundBokehPass.enabled = bokehPass.enabled;
+  }
   if (objectPostThemeActive) {
     bokehUniforms.focus.value = camera.position.distanceTo(focusTarget);
     bokehUniforms.aperture.value = objectBlurAmount * 0.5;
     bokehUniforms.maxblur.value = objectBlurAmount;
     bokehUniforms.aspect.value = camera.aspect;
-    mewTitleBackgroundBokehUniforms.focus.value = bokehUniforms.focus.value;
-    mewTitleBackgroundBokehUniforms.aperture.value = bokehUniforms.aperture.value;
-    mewTitleBackgroundBokehUniforms.maxblur.value = bokehUniforms.maxblur.value;
-    mewTitleBackgroundBokehUniforms.aspect.value = bokehUniforms.aspect.value;
+    if (mewPipeline) {
+      mewPipeline.titleBackgroundBokehUniforms.focus.value = bokehUniforms.focus.value;
+      mewPipeline.titleBackgroundBokehUniforms.aperture.value = bokehUniforms.aperture.value;
+      mewPipeline.titleBackgroundBokehUniforms.maxblur.value = bokehUniforms.maxblur.value;
+      mewPipeline.titleBackgroundBokehUniforms.aspect.value = bokehUniforms.aspect.value;
+    }
   }
   syncIvoryBackgroundOpticsPass(ivoryThemeActive);
   syncCinematicFinishPass();
   syncDressMaterialEffectUniforms();
   syncMewAlphaFeatherPass(invisibleCitiesActive);
-  syncMewAlphaFeatherPass(invisibleCitiesActive, mewTitleBackgroundAlphaFeatherPass);
+  if (mewPipeline) {
+    syncMewAlphaFeatherPass(invisibleCitiesActive, mewPipeline.titleBackgroundAlphaFeatherPass);
+  }
 
   if (dressTransitionFx > 0) {
     dressTransitionFx = Math.max(0, dressTransitionFx - delta / DRESS_TRANSITION_FX_DURATION);
@@ -2124,6 +2201,11 @@ function getVisibleSubjectObjects() {
 }
 
 function renderMewForeground(delta: number) {
+  const pipeline = mewForegroundPipeline;
+  if (!pipeline) {
+    return;
+  }
+
   if (mewTitleOverlayDirty) {
     mewTitleOverlayDirty = !updateMewTitleOverlayTexture();
   }
@@ -2135,21 +2217,21 @@ function renderMewForeground(delta: number) {
   // owned by the foreground renderer keeps the texture allocation coherent.
   const titleBackgroundSubjects = getVisibleSubjectObjects();
   const titleBackgroundSubjectVisibility = titleBackgroundSubjects.map((object) => object.visible);
-  const previousRenderTarget = mewForegroundRenderer.getRenderTarget();
-  const previousAutoClear = mewForegroundRenderer.autoClear;
+  const previousRenderTarget = pipeline.renderer.getRenderTarget();
+  const previousAutoClear = pipeline.renderer.autoClear;
   titleBackgroundSubjects.forEach((object) => {
     object.visible = false;
   });
 
   try {
-    mewTitleBackgroundComposer.render(delta);
-    mewTitleOverlayMaterial.uniforms.uBackground.value = mewTitleBackgroundComposer.readBuffer.texture;
+    pipeline.titleBackgroundComposer.render(delta);
+    mewTitleOverlayMaterial.uniforms.uBackground.value = pipeline.titleBackgroundComposer.readBuffer.texture;
   } finally {
     titleBackgroundSubjects.forEach((object, index) => {
       object.visible = titleBackgroundSubjectVisibility[index];
     });
-    mewForegroundRenderer.setRenderTarget(previousRenderTarget);
-    mewForegroundRenderer.autoClear = previousAutoClear;
+    pipeline.renderer.setRenderTarget(previousRenderTarget);
+    pipeline.renderer.autoClear = previousAutoClear;
   }
 
   // Visibility is saved and restored rather than inferred afterward. This makes
@@ -2168,23 +2250,23 @@ function renderMewForeground(delta: number) {
     object.visible = false;
   });
   scene.background = null;
-  scene.environment = mewForegroundEnvironment;
+  scene.environment = pipeline.environment;
 
   try {
-    resetMewForegroundScreenTarget();
-    mewForegroundRenderer.autoClear = true;
+    resetMewForegroundScreenTarget(pipeline.renderer);
+    pipeline.renderer.autoClear = true;
     // Clear color, depth, and stencil. Then disable automatic clears so several
     // deliberate layers can accumulate in this one canvas.
-    mewForegroundRenderer.clear(true, true, true);
-    mewForegroundRenderer.autoClear = false;
-    mewForegroundRenderer.render(mewTitleOverlayScene, mewTitleOverlayCamera);
+    pipeline.renderer.clear(true, true, true);
+    pipeline.renderer.autoClear = false;
+    pipeline.renderer.render(mewTitleOverlayScene, mewTitleOverlayCamera);
     // The title plane fills the screen and writes depth. Clearing only depth
     // preserves its color while allowing the 3D dress to draw in front.
-    mewForegroundRenderer.clearDepth();
-    mewForegroundRenderer.render(scene, camera);
-    renderSubjectBloom(delta, mewSubjectBloomPipeline);
+    pipeline.renderer.clearDepth();
+    pipeline.renderer.render(scene, camera);
+    renderSubjectBloom(delta, pipeline.subjectBloomPipeline);
   } finally {
-    mewForegroundRenderer.autoClear = true;
+    pipeline.renderer.autoClear = true;
     scene.background = previousBackground;
     scene.environment = previousEnvironment;
     hiddenObjects.forEach((object, index) => {
@@ -2193,7 +2275,7 @@ function renderMewForeground(delta: number) {
   }
 }
 
-function resetMewForegroundScreenTarget() {
+function resetMewForegroundScreenTarget(renderer: THREE.WebGLRenderer) {
   const width = Math.max(1, Math.round(mewForegroundCanvasElement.clientWidth));
   const height = Math.max(1, Math.round(mewForegroundCanvasElement.clientHeight));
 
@@ -2201,10 +2283,19 @@ function resetMewForegroundScreenTarget() {
   // targets. Explicitly restore the complete default framebuffer region before
   // clearing it; otherwise a desktop resize can retain an old title frame in a
   // previous viewport/scissor rectangle.
-  mewForegroundRenderer.setRenderTarget(null);
-  mewForegroundRenderer.setViewport(0, 0, width, height);
-  mewForegroundRenderer.setScissor(0, 0, width, height);
-  mewForegroundRenderer.setScissorTest(false);
+  renderer.setRenderTarget(null);
+  renderer.setViewport(0, 0, width, height);
+  renderer.setScissor(0, 0, width, height);
+  renderer.setScissorTest(false);
+}
+
+function resizeMewForegroundPipeline(pipeline: MewForegroundPipeline, width: number, height: number) {
+  pipeline.renderer.setPixelRatio(getRenderPixelRatio());
+  pipeline.renderer.setSize(width, height, false);
+  resetMewForegroundScreenTarget(pipeline.renderer);
+  pipeline.renderer.clear(true, true, true);
+  pipeline.titleBackgroundComposer.setSize(width, height);
+  pipeline.subjectBloomPipeline.composer.setSize(width, height);
 }
 
 function renderSharpSubjectOverlay(
@@ -3058,9 +3149,14 @@ function updateGhostVisibility(desiredGhostIds = getDesiredGhostAssetIds()) {
 // Ghosts should read as a middle layer: above decorative background sculptures,
 // then covered by the active dress when the sharp subject overlay renders.
 function syncGhostDepthMode() {
+  const windArchive = cycloramaBackgroundSettings.preset === 'tabla-rasa';
+
   ghostDressCache.forEach((record) => {
     [record.material, record.fillMaterial, record.wireMaterial].forEach((ghostMaterial) => {
-      ghostMaterial.depthTest = false;
+      // Wind Archive places a single ghost behind the subject. It still needs
+      // transparent materials, but it must depth-test so the opaque active
+      // dress can cover any overlapping part of the ghost.
+      ghostMaterial.depthTest = windArchive;
       ghostMaterial.depthWrite = false;
       ghostMaterial.needsUpdate = true;
     });
@@ -3139,17 +3235,17 @@ function applyGhostLayout(record: GhostDressRecord, visibleOrderedIds: DressAsse
 
     record.material.color.setHex(0x63737c);
     record.material.opacity = 0.55;
-    record.material.depthTest = false;
+    record.material.depthTest = true;
     record.material.depthWrite = false;
     record.material.needsUpdate = true;
     record.fillMaterial.color.setHex(0xf5f9fb);
     record.fillMaterial.opacity = 0.015;
-    record.fillMaterial.depthTest = false;
+    record.fillMaterial.depthTest = true;
     record.fillMaterial.depthWrite = false;
     record.fillMaterial.needsUpdate = true;
     record.wireMaterial.color.setHex(0x63737c);
     record.wireMaterial.opacity = 0.09;
-    record.wireMaterial.depthTest = false;
+    record.wireMaterial.depthTest = true;
     record.wireMaterial.depthWrite = false;
     record.wireMaterial.needsUpdate = true;
     return;
@@ -5298,8 +5394,14 @@ function applyCycloramaBackgroundPreset(presetId: CycloramaBackgroundPresetId) {
   const preset = CYCLO_BACKGROUND_PRESETS[presetId];
   const useIvoryHolo = preset.textureMode === 'ivory-holo';
   const useSignalBlack = preset.textureMode === 'signal-black';
+  const previousPreset = cycloramaBackgroundSettings.preset;
   cycloramaBackgroundSettings.preset = presetId;
   stageElement!.dataset.backgroundPreset = presetId;
+  if (presetId === 'mew-holo') {
+    ensureMewForegroundPipeline();
+  } else if (previousPreset === 'mew-holo') {
+    disposeMewForegroundPipeline();
+  }
   mewTitleOverlayDirty = true;
   syncCycloramaBackgroundUniforms();
   syncInfiniteBackdropMode();
@@ -5839,7 +5941,9 @@ function setMaterialOpacity(material: THREE.Material, opacity: number) {
 function syncCinematicFinishPass() {
   syncCinematicUniforms(cinematicFinishPass);
   syncCinematicUniforms(sharpSubjectCinematicFinishPass);
-  syncCinematicUniforms(mewTitleBackgroundCinematicFinishPass);
+  if (mewForegroundPipeline) {
+    syncCinematicUniforms(mewForegroundPipeline.titleBackgroundCinematicFinishPass);
+  }
 }
 
 function syncDressMaterialEffectUniforms() {
@@ -6040,11 +6144,9 @@ function resize() {
   // `false` means do not overwrite CSS width/height; layout owns CSS size while
   // the renderer controls the internal drawing-buffer resolution.
   renderer.setSize(width, height, false);
-  mewForegroundRenderer.setPixelRatio(getRenderPixelRatio());
-  mewForegroundRenderer.setSize(width, height, false);
-  resetMewForegroundScreenTarget();
-  mewForegroundRenderer.clear(true, true, true);
-  mewTitleBackgroundComposer.setSize(width, height);
+  if (mewForegroundPipeline) {
+    resizeMewForegroundPipeline(mewForegroundPipeline, width, height);
+  }
   queueMewTitleOverlayTextureUpdate();
   // Every offscreen render target must match the canvas or it will be stretched,
   // blurry, and sampled with incorrect texel sizes.
@@ -6052,7 +6154,6 @@ function resize() {
   subjectFxComposer.setSize(width, height);
   sharpSubjectComposer.setSize(width, height);
   subjectBloomPipeline.composer.setSize(width, height);
-  mewSubjectBloomPipeline.composer.setSize(width, height);
   camera.aspect = width / height;
   // applyResponsiveCamera updates fov/position and ultimately the projection
   // matrix. Changing aspect without a projection update distorts the view.
@@ -6705,15 +6806,7 @@ function dispose() {
   subjectBloomPipeline.bloomPass.dispose();
   subjectBloomPipeline.overlayMaterial.dispose();
   subjectBloomPipeline.overlayGeometry.dispose();
-  mewSubjectBloomPipeline.composer.dispose();
-  mewSubjectBloomPipeline.bloomPass.dispose();
-  mewSubjectBloomPipeline.overlayMaterial.dispose();
-  mewSubjectBloomPipeline.overlayGeometry.dispose();
-  mewTitleBackgroundComposer.dispose();
-  mewTitleBackgroundBloomPass.dispose();
-  mewTitleBackgroundBokehPass.dispose();
-  mewTitleBackgroundCinematicFinishPass.dispose();
-  mewTitleBackgroundAlphaFeatherPass.dispose();
+  disposeMewForegroundPipeline();
   mewTitleOverlayTexture.dispose();
   mewTitleOverlayMaterial.dispose();
   mewTitleOverlayGeometry.dispose();
@@ -6724,9 +6817,6 @@ function dispose() {
   disposableMaterials.forEach((material) => material.dispose());
   disposableTextures.forEach((texture) => texture.dispose());
   scene.environment?.dispose();
-  mewForegroundEnvironment.dispose();
-  mewForegroundPmrem.dispose();
-  mewForegroundRenderer.dispose();
   pmrem.dispose();
   renderer.dispose();
 }
