@@ -1608,7 +1608,12 @@ async function start() {
   hideLoadingOverlay();
   scheduleGhostDressLoads();
   animate();
-  void preloadRemainingFullDresses();
+  // The active dress and any theme-specific ghost are enough for the first
+  // mobile frame. Preloading another full textured GLB duplicates its GPU
+  // textures and can terminate Safari's WebContent process before interaction.
+  if (!usesMobileRenderProfile()) {
+    void preloadRemainingFullDresses();
+  }
 }
 
 function registerAssetServiceWorker() {
@@ -1995,7 +2000,9 @@ function pruneFullDressCache() {
     .filter((record) => record !== activeFullDress)
     .sort((a, b) => b.lastUsed - a.lastUsed);
 
-  inactiveRecords.slice(Math.max(0, FULL_DRESS_CACHE_LIMIT - 1)).forEach((record) => {
+  const cacheLimit = usesMobileRenderProfile() ? 1 : FULL_DRESS_CACHE_LIMIT;
+
+  inactiveRecords.slice(Math.max(0, cacheLimit - 1)).forEach((record) => {
     if (record === activeFullDress) {
       return;
     }
