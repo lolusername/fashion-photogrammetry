@@ -711,7 +711,11 @@ select {
   }
 
   .mew-editorial-page__mast span:last-child {
-    margin-left: 27%;
+    position: absolute;
+    top: clamp(168px, 21svh, 198px);
+    left: 27%;
+    width: 73%;
+    margin: 0;
   }
 
   .mew-editorial-page__folio {
@@ -741,11 +745,13 @@ select {
   .stage[data-background-preset="mew-holo"] .stage__canvas {
     width: calc(100% - 10px);
     height: 78vh;
+    height: 78svh;
   }
 
   .stage[data-background-preset="mew-holo"] .mew-foreground-canvas {
     width: calc(100% - 10px);
     height: 78vh;
+    height: 78svh;
   }
 
   .stage[data-background-preset="blue"] .blue-layout {

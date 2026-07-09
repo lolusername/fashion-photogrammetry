@@ -552,6 +552,17 @@ const CYCLO_TEXTURE_FALLBACK_ASPECT = 663 / 617;
 // Browser pixel ratio may be 2 or 3 on high-density displays. Capping it at 1.5
 // trades a small amount of sharpness for substantially fewer shaded pixels.
 const MAX_PIXEL_RATIO = 1.5;
+const MOBILE_MAX_PIXEL_RATIO = 1;
+
+function usesMobileRenderProfile() {
+  return window.matchMedia('(max-width: 720px), (pointer: coarse)').matches;
+}
+
+function getRenderPixelRatio() {
+  const maximum = usesMobileRenderProfile() ? MOBILE_MAX_PIXEL_RATIO : MAX_PIXEL_RATIO;
+  return Math.min(window.devicePixelRatio, maximum);
+}
+
 const TARGET_RENDER_FPS = 60;
 const TARGET_RENDER_INTERVAL_MS = 1000 / TARGET_RENDER_FPS;
 let lastRenderedAt = 0;
@@ -1018,7 +1029,7 @@ const renderer = new THREE.WebGLRenderer({
   powerPreference: 'high-performance',
 });
 renderer.setClearColor(0x758fa3, 1);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
+renderer.setPixelRatio(getRenderPixelRatio());
 // ACES filmic tone mapping compresses HDR lighting into display range with a
 // photographic highlight rolloff. Exposure scales the HDR values before that
 // curve. sRGB output converts linear rendering values for a normal display.
@@ -1041,7 +1052,7 @@ const mewForegroundRenderer = new THREE.WebGLRenderer({
   powerPreference: 'high-performance',
 });
 mewForegroundRenderer.setClearColor(0x000000, 0);
-mewForegroundRenderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
+mewForegroundRenderer.setPixelRatio(getRenderPixelRatio());
 mewForegroundRenderer.toneMapping = THREE.ACESFilmicToneMapping;
 mewForegroundRenderer.toneMappingExposure = 0.64;
 mewForegroundRenderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -1259,7 +1270,14 @@ const mewSubjectBloomPipeline = createSubjectBloomPipeline(mewForegroundRenderer
 // Canvas 2D draws the typography into an alpha mask. Three.js then uses that
 // mask in a full-screen shader. At black opacity 0 the letters become a window
 // into a captured background texture; at 1 they are solid near-black.
+// Keep this backing store stable across viewport changes. Resizing the source
+// canvas under a live CanvasTexture can leave Safari with a partially updated
+// texture, which showed up as duplicated title frames on desktop resizes.
+const MEW_TITLE_MASK_WIDTH = 1536;
+const MEW_TITLE_MASK_HEIGHT = 1024;
 const mewTitleOverlayCanvas = document.createElement('canvas');
+mewTitleOverlayCanvas.width = MEW_TITLE_MASK_WIDTH;
+mewTitleOverlayCanvas.height = MEW_TITLE_MASK_HEIGHT;
 const maybeMewTitleOverlayContext = mewTitleOverlayCanvas.getContext('2d');
 if (!maybeMewTitleOverlayContext) {
   throw new Error('Could not create the Invisible Cities title overlay.');
@@ -2153,7 +2171,7 @@ function renderMewForeground(delta: number) {
   scene.environment = mewForegroundEnvironment;
 
   try {
-    mewForegroundRenderer.setRenderTarget(null);
+    resetMewForegroundScreenTarget();
     mewForegroundRenderer.autoClear = true;
     // Clear color, depth, and stencil. Then disable automatic clears so several
     // deliberate layers can accumulate in this one canvas.
@@ -2173,6 +2191,20 @@ function renderMewForeground(delta: number) {
       object.visible = previousVisibility[index];
     });
   }
+}
+
+function resetMewForegroundScreenTarget() {
+  const width = Math.max(1, Math.round(mewForegroundCanvasElement.clientWidth));
+  const height = Math.max(1, Math.round(mewForegroundCanvasElement.clientHeight));
+
+  // EffectComposer renders the title background through several offscreen
+  // targets. Explicitly restore the complete default framebuffer region before
+  // clearing it; otherwise a desktop resize can retain an old title frame in a
+  // previous viewport/scissor rectangle.
+  mewForegroundRenderer.setRenderTarget(null);
+  mewForegroundRenderer.setViewport(0, 0, width, height);
+  mewForegroundRenderer.setScissor(0, 0, width, height);
+  mewForegroundRenderer.setScissorTest(false);
 }
 
 function renderSharpSubjectOverlay(
@@ -2642,6 +2674,13 @@ function removeModelShadowArtifacts(root: THREE.Object3D) {
 }
 
 function initializeDressThumbnails() {
+  // These thumbnails are not visible in the mobile controls. Avoiding their
+  // independent WebGL contexts leaves the full render budget for the dress,
+  // title field, and every visible post effect.
+  if (usesMobileRenderProfile()) {
+    return;
+  }
+
   dressThumbnailCanvases.forEach((thumbnailCanvas) => {
     const assetId = thumbnailCanvas.dataset.dressThumbnail;
 
@@ -2656,7 +2695,7 @@ function initializeDressThumbnails() {
       powerPreference: 'high-performance',
     });
     thumbnailRenderer.setClearColor(0x000000, 0);
-    thumbnailRenderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
+    thumbnailRenderer.setPixelRatio(getRenderPixelRatio());
     thumbnailRenderer.outputColorSpace = THREE.SRGBColorSpace;
     thumbnailRenderer.toneMapping = THREE.NoToneMapping;
 
@@ -2772,7 +2811,7 @@ function renderDressThumbnail(assetId: DressAssetId) {
 
   const width = Math.max(1, thumbnail.canvas.clientWidth || 148);
   const height = Math.max(1, thumbnail.canvas.clientHeight || 148);
-  thumbnail.renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
+  thumbnail.renderer.setPixelRatio(getRenderPixelRatio());
   thumbnail.renderer.setSize(width, height, false);
   thumbnail.camera.aspect = width / height;
   thumbnail.camera.updateProjectionMatrix();
@@ -5997,12 +6036,14 @@ function resize() {
   const width = Math.max(1, Math.round(canvasBounds.width || window.innerWidth));
   const height = Math.max(1, Math.round(canvasBounds.height || window.innerHeight));
 
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
+  renderer.setPixelRatio(getRenderPixelRatio());
   // `false` means do not overwrite CSS width/height; layout owns CSS size while
   // the renderer controls the internal drawing-buffer resolution.
   renderer.setSize(width, height, false);
-  mewForegroundRenderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
+  mewForegroundRenderer.setPixelRatio(getRenderPixelRatio());
   mewForegroundRenderer.setSize(width, height, false);
+  resetMewForegroundScreenTarget();
+  mewForegroundRenderer.clear(true, true, true);
   mewTitleBackgroundComposer.setSize(width, height);
   queueMewTitleOverlayTextureUpdate();
   // Every offscreen render target must match the canvas or it will be stretched,
@@ -6032,17 +6073,11 @@ function updateMewTitleOverlayTexture() {
   }
 
   const canvasBounds = canvasElement.getBoundingClientRect();
-  const width = Math.max(1, canvasElement.width);
-  const height = Math.max(1, canvasElement.height);
+  const width = mewTitleOverlayCanvas.width;
+  const height = mewTitleOverlayCanvas.height;
   if (canvasBounds.width <= 0 || canvasBounds.height <= 0) {
     return false;
   }
-
-  // Assigning the backing dimensions resets the 2D bitmap and drawing state.
-  // A title update is rare (theme/layout changes only), and this prevents a
-  // hidden theme's stale glyphs from surviving into the first Mew frame.
-  mewTitleOverlayCanvas.width = width;
-  mewTitleOverlayCanvas.height = height;
 
   if (cycloramaBackgroundSettings.preset !== 'mew-holo') {
     mewTitleOverlayContext.clearRect(0, 0, width, height);
@@ -6086,16 +6121,18 @@ function updateMewTitleOverlayTexture() {
   mewTitleOverlayContext.save();
   mewTitleOverlayContext.translate(x, baseline);
   mewTitleOverlayContext.scale(targetWidth / measuredWidth, 1);
-mewTitleOverlayContext.globalAlpha = 1;
+  mewTitleOverlayContext.globalAlpha = 1;
 
-// Draw a clean outside border into the mask texture.
-// Black stroke = border marker.
-mewTitleOverlayContext.lineJoin = 'round';
-mewTitleOverlayContext.miterLimit = 2;
-const titleBorderWidth = fontSize * 0.01;
-mewTitleOverlayContext.lineWidth = titleBorderWidth;
-mewTitleOverlayContext.strokeStyle = '#000000';
-mewTitleOverlayContext.strokeText(text, 0, 0);
+  if (!usesMobileRenderProfile()) {
+    // Desktop keeps the authored outline treatment. On mobile the same outline
+    // consumes too much of the reduced glyph area, so its alpha mask is a
+    // single solid silhouette instead.
+    mewTitleOverlayContext.lineJoin = 'round';
+    mewTitleOverlayContext.miterLimit = 2;
+    mewTitleOverlayContext.lineWidth = fontSize * 0.01;
+    mewTitleOverlayContext.strokeStyle = '#000000';
+    mewTitleOverlayContext.strokeText(text, 0, 0);
+  }
 
 // White fill = inner-letter marker.
 // This is NOT the visible color. The shader still decides visible fill color.
@@ -6410,7 +6447,7 @@ function ensureSignalGraphNodeRecord(assetId: DressAssetId, canvas: HTMLCanvasEl
     powerPreference: 'low-power',
   });
   renderer.setClearColor(0x000000, 0);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
+  renderer.setPixelRatio(getRenderPixelRatio());
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.NoToneMapping;
 
@@ -6430,7 +6467,7 @@ function renderSignalGraphNodes() {
     }
     const styled = Number(node.canvas.dataset.signalNodeSize || '0');
     const size = styled || node.canvas.clientWidth || 128;
-    node.renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
+    node.renderer.setPixelRatio(getRenderPixelRatio());
     node.renderer.setSize(size, size, false);
     thumb.camera.aspect = 1;
     thumb.camera.updateProjectionMatrix();
