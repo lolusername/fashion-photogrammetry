@@ -1268,18 +1268,39 @@ const mewTitleOverlayTexture = new THREE.CanvasTexture(mewTitleOverlayCanvas);
 mewTitleOverlayTexture.colorSpace = THREE.SRGBColorSpace;
 mewTitleOverlayTexture.minFilter = THREE.LinearFilter;
 mewTitleOverlayTexture.magFilter = THREE.LinearFilter;
-const mewBackgroundCanvasTexture = new THREE.CanvasTexture(canvasElement);
-mewBackgroundCanvasTexture.minFilter = THREE.LinearFilter;
-mewBackgroundCanvasTexture.magFilter = THREE.LinearFilter;
-mewBackgroundCanvasTexture.generateMipmaps = false;
-// Mipmaps improve minification of static textures, but this texture changes
-// from the live canvas; regenerating its entire mip chain would waste time.
+// The title samples the same processed background as the main canvas. Its
+// composer belongs to the foreground renderer, so no WebGL canvas is ever
+// uploaded into a different WebGL context on Mobile Safari.
+const mewTitleBackgroundComposer = new EffectComposer(mewForegroundRenderer);
+mewTitleBackgroundComposer.renderToScreen = false;
+mewTitleBackgroundComposer.addPass(new RenderPass(scene, camera));
+const mewTitleBackgroundBloomPass = new UnrealBloomPass(
+  new THREE.Vector2(1, 1),
+  BLOOM_BASE_STRENGTH,
+  BLOOM_BASE_RADIUS,
+  BLOOM_THRESHOLD,
+);
+mewTitleBackgroundComposer.addPass(mewTitleBackgroundBloomPass);
+const mewTitleBackgroundBokehPass = new BokehPass(scene, camera, {
+  focus: camera.position.distanceTo(focusTarget),
+  aperture: 0.013,
+  maxblur: 0.028,
+});
+const mewTitleBackgroundBokehUniforms = mewTitleBackgroundBokehPass.uniforms as Record<string, THREE.IUniform<number>>;
+mewTitleBackgroundBokehPass.enabled = false;
+mewTitleBackgroundComposer.addPass(mewTitleBackgroundBokehPass);
+const mewTitleBackgroundCinematicFinishPass = new ShaderPass(CINEMATIC_FINISH_SHADER);
+mewTitleBackgroundComposer.addPass(mewTitleBackgroundCinematicFinishPass);
+const mewTitleBackgroundAlphaFeatherPass = new ShaderPass(MEW_ALPHA_FEATHER_SHADER);
+mewTitleBackgroundAlphaFeatherPass.enabled = false;
+mewTitleBackgroundComposer.addPass(mewTitleBackgroundAlphaFeatherPass);
+mewTitleBackgroundComposer.addPass(new OutputPass());
 const mewTitleOverlayScene = new THREE.Scene();
 const mewTitleOverlayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const mewTitleOverlayGeometry = new THREE.PlaneGeometry(2, 2);
 const mewTitleOverlayMaterial = new THREE.ShaderMaterial({
   uniforms: {
-    uBackground: { value: mewBackgroundCanvasTexture },
+    uBackground: { value: mewTitleBackgroundComposer.readBuffer.texture },
     uMask: { value: mewTitleOverlayTexture },
     uBlackOpacity: { value: 1 },
   },
@@ -1931,16 +1952,25 @@ function animate(timestamp?: number) {
     : signalThemeActive
     ? 0.05
     : BLOOM_BASE_RADIUS + pointerWind.activity * BLOOM_WIND_RADIUS;
+  mewTitleBackgroundBloomPass.threshold = bloomPass.threshold;
+  mewTitleBackgroundBloomPass.strength = bloomPass.strength;
+  mewTitleBackgroundBloomPass.radius = bloomPass.radius;
   bokehPass.enabled = objectPostThemeActive;
+  mewTitleBackgroundBokehPass.enabled = bokehPass.enabled;
   if (objectPostThemeActive) {
     bokehUniforms.focus.value = camera.position.distanceTo(focusTarget);
     bokehUniforms.aperture.value = objectBlurAmount * 0.5;
     bokehUniforms.maxblur.value = objectBlurAmount;
     bokehUniforms.aspect.value = camera.aspect;
+    mewTitleBackgroundBokehUniforms.focus.value = bokehUniforms.focus.value;
+    mewTitleBackgroundBokehUniforms.aperture.value = bokehUniforms.aperture.value;
+    mewTitleBackgroundBokehUniforms.maxblur.value = bokehUniforms.maxblur.value;
+    mewTitleBackgroundBokehUniforms.aspect.value = bokehUniforms.aspect.value;
   }
   syncIvoryBackgroundOpticsPass(ivoryThemeActive);
   syncCinematicFinishPass();
   syncMewAlphaFeatherPass(invisibleCitiesActive);
+  syncMewAlphaFeatherPass(invisibleCitiesActive, mewTitleBackgroundAlphaFeatherPass);
 
   if (dressTransitionFx > 0) {
     dressTransitionFx = Math.max(0, dressTransitionFx - delta / DRESS_TRANSITION_FX_DURATION);
@@ -2016,6 +2046,30 @@ function getVisibleSubjectObjects() {
 }
 
 function renderMewForeground(delta: number) {
+  // Capture the title's live background without crossing WebGL contexts. The
+  // base canvas is rendered by `renderer`; copying that canvas into the
+  // foreground renderer used texSubImage2D and could retain stale dimensions
+  // after a Mobile Safari resize. Rendering the same background into a target
+  // owned by the foreground renderer keeps the texture allocation coherent.
+  const titleBackgroundSubjects = getVisibleSubjectObjects();
+  const titleBackgroundSubjectVisibility = titleBackgroundSubjects.map((object) => object.visible);
+  const previousRenderTarget = mewForegroundRenderer.getRenderTarget();
+  const previousAutoClear = mewForegroundRenderer.autoClear;
+  titleBackgroundSubjects.forEach((object) => {
+    object.visible = false;
+  });
+
+  try {
+    mewTitleBackgroundComposer.render(delta);
+    mewTitleOverlayMaterial.uniforms.uBackground.value = mewTitleBackgroundComposer.readBuffer.texture;
+  } finally {
+    titleBackgroundSubjects.forEach((object, index) => {
+      object.visible = titleBackgroundSubjectVisibility[index];
+    });
+    mewForegroundRenderer.setRenderTarget(previousRenderTarget);
+    mewForegroundRenderer.autoClear = previousAutoClear;
+  }
+
   // Visibility is saved and restored rather than inferred afterward. This makes
   // the function safe when a theme intentionally hides one of these groups.
   const hiddenObjects: THREE.Object3D[] = [];
@@ -2035,11 +2089,6 @@ function renderMewForeground(delta: number) {
   scene.environment = mewForegroundEnvironment;
 
   try {
-    if (mewTitleBlackOpacity < 0.999) {
-      // CanvasTexture does not automatically know its source canvas changed.
-      // `needsUpdate` schedules a fresh GPU upload before the next draw.
-      mewBackgroundCanvasTexture.needsUpdate = true;
-    }
     mewForegroundRenderer.setRenderTarget(null);
     mewForegroundRenderer.autoClear = true;
     // Clear color, depth, and stencil. Then disable automatic clears so several
@@ -5676,6 +5725,7 @@ function setMaterialOpacity(material: THREE.Material, opacity: number) {
 function syncCinematicFinishPass() {
   syncCinematicUniforms(cinematicFinishPass);
   syncCinematicUniforms(sharpSubjectCinematicFinishPass);
+  syncCinematicUniforms(mewTitleBackgroundCinematicFinishPass);
 }
 
 function syncCinematicUniforms(pass: ShaderPass) {
@@ -5699,10 +5749,10 @@ function syncCinematicUniforms(pass: ShaderPass) {
   uniforms.uBlackLift.value = cinematicSettings.blackLift;
 }
 
-function syncMewAlphaFeatherPass(enabled: boolean) {
-  mewAlphaFeatherPass.enabled = enabled;
+function syncMewAlphaFeatherPass(enabled: boolean, pass = mewAlphaFeatherPass) {
+  pass.enabled = enabled;
 
-  const uniforms = mewAlphaFeatherPass.uniforms as Record<string, THREE.IUniform<number>>;
+  const uniforms = pass.uniforms as Record<string, THREE.IUniform<number>>;
   uniforms.uFeatherWidth.value = 0.31;
   uniforms.uFeatherOpacity.value = 1;
   uniforms.uFeatherLift.value = 0.72;
@@ -5847,6 +5897,7 @@ function resize() {
   renderer.setSize(width, height, false);
   mewForegroundRenderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
   mewForegroundRenderer.setSize(width, height, false);
+  mewTitleBackgroundComposer.setSize(width, height);
   updateMewTitleOverlayTexture();
   // Every offscreen render target must match the canvas or it will be stretched,
   // blurry, and sampled with incorrect texel sizes.
@@ -6537,8 +6588,12 @@ function dispose() {
   mewSubjectBloomPipeline.bloomPass.dispose();
   mewSubjectBloomPipeline.overlayMaterial.dispose();
   mewSubjectBloomPipeline.overlayGeometry.dispose();
+  mewTitleBackgroundComposer.dispose();
+  mewTitleBackgroundBloomPass.dispose();
+  mewTitleBackgroundBokehPass.dispose();
+  mewTitleBackgroundCinematicFinishPass.dispose();
+  mewTitleBackgroundAlphaFeatherPass.dispose();
   mewTitleOverlayTexture.dispose();
-  mewBackgroundCanvasTexture.dispose();
   mewTitleOverlayMaterial.dispose();
   mewTitleOverlayGeometry.dispose();
   signalGraphNodeRecords.forEach((record) => record.renderer.dispose());
