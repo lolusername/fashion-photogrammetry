@@ -1992,9 +1992,12 @@ function animate(timestamp?: number) {
 
 function getVisibleFullDressObjects() {
   const objects: THREE.Object3D[] = [];
+
   fullDressCache.forEach((record) => {
     if (record.pivot.visible) {
-      objects.push(record.pivot);
+      // Hide the imported dress model, not the whole pivot.
+      // This keeps pivot-attached floor shadows visible in the base/environment pass.
+      objects.push(record.loaded.root);
     }
   });
 
@@ -2064,7 +2067,7 @@ function renderSharpSubjectOverlay(
   options: { direct?: boolean; hideGhosts?: boolean } = {},
 ) {
   const hiddenObjects: THREE.Object3D[] = [];
-  [cycloramaMesh, infiniteBackdropMesh, holoAccentGroup, ivorySculptureGroup, photoPrintGroup, windArchiveDressShadow, yellowBacking, paperRollMesh].forEach((object) => {
+  [cycloramaMesh, infiniteBackdropMesh, holoAccentGroup, ivorySculptureGroup, photoPrintGroup, windArchiveDressShadow, yellowBacking, paperRollMesh, dialecticHalftoneShadow].forEach((object) => {
     if (object) {
       hiddenObjects.push(object);
     }
@@ -3381,7 +3384,7 @@ function addStudio(targetScene: THREE.Scene) {
   // Because this mesh is later parented to the dress pivot, its transform is
   // also multiplied by the current dress's pivot scale.
   dialecticHalftoneShadow.rotation.x = PHOTO_PRINT_SURFACE_TILT;
-  dialecticHalftoneShadow.position.set(0.06, -0.27, 0.68);
+  dialecticHalftoneShadow.position.set(0.06, -0.27, -0.08);
   dialecticHalftoneShadow.scale.set(2, 1.3, 1);
   // Transparent objects are sorted partly by renderOrder. A fixed positive
   // order makes this draw after background geometry. The material does not

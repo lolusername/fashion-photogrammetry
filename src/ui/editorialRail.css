@@ -144,7 +144,7 @@
 }
 
 .editorial-rail__theme[data-active="true"] {
-  background: rgba(218, 233, 242, 0.3);
+  background: rgba(242, 233, 218, 0.2);
 }
 
 .editorial-rail__theme[data-active="true"]::before {

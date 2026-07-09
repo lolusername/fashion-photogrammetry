@@ -17,7 +17,6 @@
   width: 224px;
   min-height: 46px;
   border: 1px solid var(--experience-line);
-  background: var(--experience-paper);
   font-family: Arial, Helvetica, sans-serif;
   backdrop-filter: blur(12px);
 }

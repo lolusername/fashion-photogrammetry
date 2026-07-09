@@ -73,7 +73,7 @@ export function createSceneShell(options: SceneShellOptions): SceneShell {
             min="0"
             max="100"
             step="1"
-            value="100"
+            value="0"
             data-mew-title-opacity
             aria-label="Invisible Cities title black opacity"
           />
