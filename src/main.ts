@@ -259,6 +259,17 @@ type SubjectBloomPipeline = {
   overlayMaterial: THREE.ShaderMaterial;
 };
 
+type SubjectTransitionPipeline = {
+  renderTarget: THREE.WebGLRenderTarget;
+  composer: EffectComposer;
+  renderPass: RenderPass;
+  glitchPass: GlitchPass;
+  overlayScene: THREE.Scene;
+  overlayCamera: THREE.OrthographicCamera;
+  overlayGeometry: THREE.PlaneGeometry;
+  overlayMaterial: THREE.MeshBasicMaterial;
+};
+
 type MewForegroundPipeline = {
   renderer: THREE.WebGLRenderer;
   pmrem: THREE.PMREMGenerator;
@@ -1131,66 +1142,81 @@ composer.addPass(mewAlphaFeatherPass);
 // operate on nonlinear display values.
 composer.addPass(new OutputPass());
 
-// --- Dress transition FX pipeline (self-contained; remove this block + its
-// usages to revert). Renders ONLY the dress/arm figure into an offscreen target
-// with a strong bloom + GlitchPass, then we additively composite it over the
-// final frame during a transition so the burst/glitch is localized to the figure.
-const subjectFxRenderTarget = new THREE.WebGLRenderTarget(1, 1, {
-  // Half-float keeps values above display white so bloom can respond to HDR
-  // highlights without the memory cost of full 32-bit floating-point channels.
-  type: THREE.HalfFloatType,
-});
-subjectFxRenderTarget.texture.colorSpace = THREE.SRGBColorSpace;
-const subjectFxComposer = new EffectComposer(renderer, subjectFxRenderTarget);
-subjectFxComposer.renderToScreen = false;
-const subjectFxRenderPass = new RenderPass(scene, camera);
-subjectFxRenderPass.clearAlpha = 0;
-subjectFxComposer.addPass(subjectFxRenderPass);
-const subjectFxBloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.24, 0.3, 0.2);
-subjectFxComposer.addPass(subjectFxBloomPass);
-const subjectFxGlitchPass = new GlitchPass();
-(subjectFxGlitchPass.uniforms as Record<string, THREE.IUniform<number>>).col_s.value = 0.012;
-subjectFxComposer.addPass(subjectFxGlitchPass);
-subjectFxComposer.addPass(new OutputPass());
+// The transition bloom/glitch uses full-screen targets, but only for a 720ms
+// dress change. Keeping them alive during the rest of a mobile session wastes
+// enough GPU memory to make WebKit terminate the page. It is therefore created
+// on the transition frame and released immediately after the effect finishes.
+let subjectTransitionPipeline: SubjectTransitionPipeline | null = null;
 
-const subjectFxOverlayScene = new THREE.Scene();
-const subjectFxOverlayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-const subjectFxOverlayMaterial = new THREE.MeshBasicMaterial({
-  map: subjectFxRenderTarget.texture,
-  transparent: true,
-  // Additive blending behaves approximately as output = source + destination.
-  // Black contributes nothing; bright FX light accumulates over the base frame.
-  blending: THREE.AdditiveBlending,
-  depthTest: false,
-  depthWrite: false,
-  toneMapped: false,
-});
-subjectFxOverlayScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), subjectFxOverlayMaterial));
+function ensureSubjectTransitionPipeline() {
+  if (subjectTransitionPipeline) {
+    return subjectTransitionPipeline;
+  }
 
-const sharpSubjectRenderTarget = new THREE.WebGLRenderTarget(1, 1, {
-  type: THREE.HalfFloatType,
-});
-sharpSubjectRenderTarget.texture.colorSpace = THREE.SRGBColorSpace;
-const sharpSubjectComposer = new EffectComposer(renderer, sharpSubjectRenderTarget);
-sharpSubjectComposer.renderToScreen = false;
-const sharpSubjectRenderPass = new RenderPass(scene, camera);
-sharpSubjectRenderPass.clearAlpha = 0;
-sharpSubjectComposer.addPass(sharpSubjectRenderPass);
-const sharpSubjectCinematicFinishPass = new ShaderPass(CINEMATIC_FINISH_SHADER);
-sharpSubjectComposer.addPass(sharpSubjectCinematicFinishPass);
-sharpSubjectComposer.addPass(new OutputPass());
+  const renderTarget = new THREE.WebGLRenderTarget(1, 1, {
+    // Half-float keeps values above display white so bloom can respond to HDR
+    // highlights without the memory cost of full 32-bit floating-point channels.
+    type: THREE.HalfFloatType,
+  });
+  renderTarget.texture.colorSpace = THREE.SRGBColorSpace;
+  const composer = new EffectComposer(renderer, renderTarget);
+  composer.renderToScreen = false;
+  const renderPass = new RenderPass(scene, camera);
+  renderPass.clearAlpha = 0;
+  composer.addPass(renderPass);
+  composer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), 0.24, 0.3, 0.2));
+  const glitchPass = new GlitchPass();
+  (glitchPass.uniforms as Record<string, THREE.IUniform<number>>).col_s.value = 0.012;
+  composer.addPass(glitchPass);
+  composer.addPass(new OutputPass());
 
-const sharpSubjectOverlayScene = new THREE.Scene();
-const sharpSubjectOverlayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-const sharpSubjectOverlayGeometry = new THREE.PlaneGeometry(2, 2);
-const sharpSubjectOverlayMaterial = new THREE.MeshBasicMaterial({
-  map: sharpSubjectRenderTarget.texture,
-  transparent: true,
-  depthTest: false,
-  depthWrite: false,
-  toneMapped: false,
-});
-sharpSubjectOverlayScene.add(new THREE.Mesh(sharpSubjectOverlayGeometry, sharpSubjectOverlayMaterial));
+  const overlayScene = new THREE.Scene();
+  const overlayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const overlayGeometry = new THREE.PlaneGeometry(2, 2);
+  const overlayMaterial = new THREE.MeshBasicMaterial({
+    map: renderTarget.texture,
+    transparent: true,
+    // Additive blending behaves approximately as output = source + destination.
+    // Black contributes nothing; bright FX light accumulates over the base frame.
+    blending: THREE.AdditiveBlending,
+    depthTest: false,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  overlayScene.add(new THREE.Mesh(overlayGeometry, overlayMaterial));
+
+  subjectTransitionPipeline = {
+    renderTarget,
+    composer,
+    renderPass,
+    glitchPass,
+    overlayScene,
+    overlayCamera,
+    overlayGeometry,
+    overlayMaterial,
+  };
+
+  const canvasBounds = canvasElement.getBoundingClientRect();
+  resizeEffectComposer(
+    composer,
+    Math.max(1, Math.round(canvasBounds.width || window.innerWidth)),
+    Math.max(1, Math.round(canvasBounds.height || window.innerHeight)),
+  );
+  return subjectTransitionPipeline;
+}
+
+function disposeSubjectTransitionPipeline() {
+  const pipeline = subjectTransitionPipeline;
+  if (!pipeline) {
+    return;
+  }
+
+  pipeline.composer.dispose();
+  pipeline.renderTarget.dispose();
+  pipeline.overlayMaterial.dispose();
+  pipeline.overlayGeometry.dispose();
+  subjectTransitionPipeline = null;
+}
 
 function createSubjectBloomPipeline(targetRenderer: THREE.WebGLRenderer): SubjectBloomPipeline {
   // Selective bloom recipe:
@@ -1894,6 +1920,7 @@ function maybeStartDressTransitionFx() {
 // Renders just the dress/arm figure (no background, ghosts or shadow) through the
 // FX composer so its bloom + glitch stay localized to the figure.
 function renderDressTransitionFx(delta: number): boolean {
+  const pipeline = ensureSubjectTransitionPipeline();
   const subjectPivots: THREE.Object3D[] = [];
   fullDressCache.forEach((record) => {
     if (record.pivot.visible) {
@@ -1938,13 +1965,13 @@ function renderDressTransitionFx(delta: number): boolean {
   scene.background = null;
   scene.fog = null;
 
-  subjectFxGlitchPass.enabled = dressTransitionFx > 0.18 && dressTransitionFx < 0.82;
+  pipeline.glitchPass.enabled = dressTransitionFx > 0.18 && dressTransitionFx < 0.82;
   // Keep glitch subtle: never use goWild (the violent full-screen mode),
   // and only let it flicker during the middle of the crossfade.
-  subjectFxGlitchPass.goWild = false;
+  pipeline.glitchPass.goWild = false;
 
   try {
-    subjectFxComposer.render(delta);
+    pipeline.composer.render(delta);
   } finally {
     scene.background = previousBackground;
     scene.fog = previousFog;
@@ -2166,9 +2193,7 @@ function animate(timestamp?: number) {
       // This theme uses the second transparent canvas and title-mask ordering.
       renderMewForeground(delta);
     } else {
-      renderSharpSubjectOverlay(delta, {
-        direct: true,
-      });
+      renderSharpSubjectOverlay(delta);
     }
   } else {
     composer.render(delta);
@@ -2178,10 +2203,14 @@ function animate(timestamp?: number) {
     // Ease the burst in/out so it peaks mid-transition rather than snapping,
     // and keep the overall contribution restrained (subtle, not a flash).
     const eased = Math.sin(Math.min(1, dressTransitionFx) * Math.PI * 0.5);
-    subjectFxOverlayMaterial.opacity = eased * DRESS_TRANSITION_FX_OVERLAY_OPACITY;
-    renderer.autoClear = false;
-    renderer.render(subjectFxOverlayScene, subjectFxOverlayCamera);
-    renderer.autoClear = true;
+    if (subjectTransitionPipeline) {
+      subjectTransitionPipeline.overlayMaterial.opacity = eased * DRESS_TRANSITION_FX_OVERLAY_OPACITY;
+      renderer.autoClear = false;
+      renderer.render(subjectTransitionPipeline.overlayScene, subjectTransitionPipeline.overlayCamera);
+      renderer.autoClear = true;
+    }
+  } else if (subjectTransitionPipeline) {
+    disposeSubjectTransitionPipeline();
   }
 
   animationFrame = window.requestAnimationFrame(animate);
@@ -2318,19 +2347,13 @@ function resizeEffectComposer(composer: EffectComposer, width: number, height: n
   composer.setSize(width, height);
 }
 
-function renderSharpSubjectOverlay(
-  delta: number,
-  options: { direct?: boolean; hideGhosts?: boolean } = {},
-) {
+function renderSharpSubjectOverlay(delta: number) {
   const hiddenObjects: THREE.Object3D[] = [];
   [cycloramaMesh, infiniteBackdropMesh, holoAccentGroup, ivorySculptureGroup, photoPrintGroup, windArchiveDressShadow, yellowBacking, paperRollMesh, dialecticHalftoneShadow].forEach((object) => {
     if (object) {
       hiddenObjects.push(object);
     }
   });
-  if (options.hideGhosts && dressGhostGroup.visible) {
-    hiddenObjects.push(dressGhostGroup);
-  }
   const previousVisibility = hiddenObjects.map((object) => object.visible);
   const previousAutoClear = renderer.autoClear;
   const previousBackground = scene.background;
@@ -2341,19 +2364,13 @@ function renderSharpSubjectOverlay(
 
   scene.background = null;
   try {
-    if (options.direct) {
-      // Keep the already-rendered environment color, clear its depth values,
-      // and draw subject geometry as the nearest new layer.
-      renderer.autoClear = false;
-      renderer.clearDepth();
-      renderer.render(scene, camera);
-    } else {
-      sharpSubjectRenderPass.clearAlpha = 0;
-      sharpSubjectComposer.render(delta);
-      renderer.setRenderTarget(null);
-      renderer.autoClear = false;
-      renderer.render(sharpSubjectOverlayScene, sharpSubjectOverlayCamera);
-    }
+    // Keep the already-rendered environment color, clear its depth values,
+    // and draw subject geometry as the nearest new layer. The former offscreen
+    // sharp-subject compositor was never used by this path, yet held several
+    // full-screen GPU targets for every theme.
+    renderer.autoClear = false;
+    renderer.clearDepth();
+    renderer.render(scene, camera);
     renderSubjectBloom(delta, subjectBloomPipeline);
   } finally {
     renderer.autoClear = previousAutoClear;
@@ -5960,7 +5977,6 @@ function setMaterialOpacity(material: THREE.Material, opacity: number) {
 
 function syncCinematicFinishPass() {
   syncCinematicUniforms(cinematicFinishPass);
-  syncCinematicUniforms(sharpSubjectCinematicFinishPass);
   if (mewForegroundPipeline) {
     syncCinematicUniforms(mewForegroundPipeline.titleBackgroundCinematicFinishPass);
   }
@@ -6171,8 +6187,9 @@ function resize() {
   // Every offscreen render target must match the canvas or it will be stretched,
   // blurry, and sampled with incorrect texel sizes.
   resizeEffectComposer(composer, width, height);
-  resizeEffectComposer(subjectFxComposer, width, height);
-  resizeEffectComposer(sharpSubjectComposer, width, height);
+  if (subjectTransitionPipeline) {
+    resizeEffectComposer(subjectTransitionPipeline.composer, width, height);
+  }
   resizeEffectComposer(subjectBloomPipeline.composer, width, height);
   camera.aspect = width / height;
   // applyResponsiveCamera updates fov/position and ultimately the projection
@@ -6815,13 +6832,7 @@ function dispose() {
   ghostPickTargets.length = 0;
   controls.dispose();
   composer.dispose();
-  subjectFxComposer.dispose();
-  subjectFxRenderTarget.dispose();
-  subjectFxOverlayMaterial.dispose();
-  sharpSubjectComposer.dispose();
-  sharpSubjectRenderTarget.dispose();
-  sharpSubjectOverlayMaterial.dispose();
-  sharpSubjectOverlayGeometry.dispose();
+  disposeSubjectTransitionPipeline();
   subjectBloomPipeline.composer.dispose();
   subjectBloomPipeline.bloomPass.dispose();
   subjectBloomPipeline.overlayMaterial.dispose();
