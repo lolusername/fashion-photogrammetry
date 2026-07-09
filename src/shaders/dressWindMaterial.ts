@@ -67,6 +67,13 @@ export type DressWindUpdate = {
   gustRadius: number;
 };
 
+export type DressMaterialGrainUpdate = {
+  time: number;
+  resolutionWidth: number;
+  resolutionHeight: number;
+  filmGrain: number;
+};
+
 export type DressWindController = {
   update: (input: DressWindUpdate) => void;
   dispose: () => void;
@@ -84,6 +91,28 @@ type WindSharedUniforms = {
   uFlutter: THREE.IUniform<number>;
   uGustRadius: THREE.IUniform<number>;
 };
+
+type DressMaterialGrainUniforms = {
+  uDressGrainTime: THREE.IUniform<number>;
+  uDressGrainResolution: THREE.IUniform<THREE.Vector2>;
+  uDressFilmGrain: THREE.IUniform<number>;
+};
+
+const dressMaterialGrainUniforms: DressMaterialGrainUniforms = {
+  uDressGrainTime: { value: 0 },
+  uDressGrainResolution: { value: new THREE.Vector2(1, 1) },
+  uDressFilmGrain: { value: 0 },
+};
+
+export function syncDressMaterialGrain(input: DressMaterialGrainUpdate) {
+  dressMaterialGrainUniforms.uDressGrainTime.value = input.time;
+  dressMaterialGrainUniforms.uDressGrainResolution.value.set(
+    Math.max(1, input.resolutionWidth),
+    Math.max(1, input.resolutionHeight),
+  );
+  dressMaterialGrainUniforms.uDressFilmGrain.value = input.filmGrain;
+}
+
 
 type GeometryBounds = {
   // Local-space bounds normalize arbitrary mesh coordinates to stable 0..1
@@ -129,7 +158,7 @@ type FabricMaterial = THREE.Material & {
 
 export const DRESS_WIND_PRESETS: Record<'editorial' | 'quiet', DressWindSettings> = {
   // Presets are semantic starting points. Keeping them as data makes them usable
-  // by both the debug GUI and initialization code.
+  // by both runtime tuning code and initialization code.
   editorial: {
     windStrength: 0.072,
     fabricLooseness: 0.82,
@@ -323,7 +352,7 @@ function createWindMaterial(
 
   material.name = sourceMaterial.name ? `${sourceMaterial.name} wind` : 'dress wind';
   makeDressMaterialMatte(material);
-  patchWindMaterial(material, sharedUniforms, boundsUniforms, 'dress-wind-material-v8');
+  patchWindMaterial(material, sharedUniforms, boundsUniforms, 'dress-wind-material-v10', true);
   material.needsUpdate = true;
 
   return material;
@@ -410,7 +439,7 @@ function createWindDepthMaterial(
   };
 
   material.name = 'dress wind shadow';
-  patchWindMaterial(material, sharedUniforms, boundsUniforms, 'dress-wind-depth-v7');
+  patchWindMaterial(material, sharedUniforms, boundsUniforms, 'dress-wind-depth-v7', false);
   material.needsUpdate = true;
 
   return material;
@@ -421,13 +450,30 @@ function patchWindMaterial(
   sharedUniforms: WindSharedUniforms,
   boundsUniforms: Record<string, THREE.IUniform<number>>,
   cacheKey: string,
+  includeDressMaterialGrain: boolean,
 ) {
   // onBeforeCompile runs when Three.js is about to compile a generated shader.
   // It is not called every frame. Uniform values can still change every frame.
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, sharedUniforms, boundsUniforms);
+    if (includeDressMaterialGrain) {
+      Object.assign(shader.uniforms, dressMaterialGrainUniforms);
+    }
     // Inject uniform/function declarations next to Three.js's common chunk.
-    shader.vertexShader = shader.vertexShader.replace('#include <common>', `${windUniformsChunk}\n#include <common>`);
+    shader.vertexShader = shader.vertexShader.replace('#include <common>', `${windUniformsChunk}
+#include <common>`);
+    if (includeDressMaterialGrain) {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <common>',
+        `#include <common>
+${dressMaterialGrainChunk}`,
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        `${dressMaterialGrainApplyChunk}
+#include <dithering_fragment>`,
+      );
+    }
     // `transformed` is Three.js's working local-space vertex. Adding our offset
     // here occurs before later skinning/projection chunks complete the pipeline.
     shader.vertexShader = shader.vertexShader.replace(
@@ -440,9 +486,31 @@ function patchWindMaterial(
   // key tells the cache that this patched source differs from the built-in one.
   material.customProgramCacheKey = () => cacheKey;
 }
-
-// Everything inside this string is GLSL, compiled by the GPU driver rather than
+// Everything inside these strings is GLSL, compiled by the GPU driver rather than
 // TypeScript. Avoid JavaScript template-string delimiters inside GLSL comments.
+const dressMaterialGrainChunk = `
+uniform float uDressGrainTime;
+uniform vec2 uDressGrainResolution;
+uniform float uDressFilmGrain;
+
+float dressGrainHash(vec2 value) {
+  return fract(sin(dot(value, vec2(12.9898, 78.233))) * 43758.5453123);
+}
+
+float dressGrainLuma(vec3 color) {
+  return dot(color, vec3(0.299, 0.587, 0.114));
+}
+`;
+
+const dressMaterialGrainApplyChunk = `
+float dressGrainLuminance = dressGrainLuma(gl_FragColor.rgb);
+vec2 dressGrainUv = gl_FragCoord.xy / max(uDressGrainResolution, vec2(1.0));
+float dressGrainA = dressGrainHash(floor(dressGrainUv * vec2(820.0, 1180.0)) + uDressGrainTime * 23.0);
+float dressGrainB = dressGrainHash(dressGrainUv * vec2(1620.0, 940.0) + uDressGrainTime * 41.0);
+float dressGrain = ((dressGrainA * 0.68 + dressGrainB * 0.32) - 0.5) * uDressFilmGrain;
+gl_FragColor.rgb = clamp(gl_FragColor.rgb + dressGrain * (0.82 + dressGrainLuminance * 0.22), 0.0, 1.0);
+`;
+
 const windUniformsChunk = `
 uniform float uWindTime;
 uniform vec3 uWindVector;

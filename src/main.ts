@@ -1,7 +1,4 @@
 import './style.css';
-import '../node_modules/lil-gui/dist/lil-gui.css';
-
-import { GUI } from 'lil-gui';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
@@ -38,6 +35,7 @@ import {
   type DressWindController,
   type DressWindSettings,
   createDressWindController,
+  syncDressMaterialGrain,
 } from './shaders/dressWindMaterial';
 
 /**
@@ -392,12 +390,6 @@ const INFINITE_BACKDROP_MODE_VALUES: Record<CycloramaBackgroundPresetId, number>
   'ivory-holo': 0,
   'signal-black': 2,
 };
-const CYCLO_BACKGROUND_GUI_OPTIONS = Object.fromEntries(
-  PUBLIC_THEMES.map((preset) => [preset.label, preset.id]),
-) as Record<string, CycloramaBackgroundPresetId>;
-const DRESS_ASSET_GUI_OPTIONS = Object.fromEntries(
-  Object.values(DRESS_ASSETS).map((asset) => [asset.label, asset.id]),
-) as Record<string, DressAssetId>;
 const app = document.querySelector<HTMLDivElement>('#app');
 
 if (!app) {
@@ -459,6 +451,13 @@ const loadingOverlay = loadingOverlayElement;
 const loadingDetail = loadingDetailElement;
 const showControls = new URLSearchParams(window.location.search).get('controls') === '1';
 stageElement.dataset.tuningControls = showControls ? 'true' : 'false';
+
+const silentMewReload = sessionStorage.getItem('silent-mew-reload') === '1';
+if (silentMewReload) {
+  sessionStorage.removeItem('silent-mew-reload');
+  loadingOverlay.dataset.hidden = 'true';
+}
+
 statusElement.textContent = 'Booting scene';
 
 THREE.ColorManagement.enabled = true;
@@ -553,6 +552,9 @@ const CYCLO_TEXTURE_FALLBACK_ASPECT = 663 / 617;
 // Browser pixel ratio may be 2 or 3 on high-density displays. Capping it at 1.5
 // trades a small amount of sharpness for substantially fewer shaded pixels.
 const MAX_PIXEL_RATIO = 1.5;
+const TARGET_RENDER_FPS = 60;
+const TARGET_RENDER_INTERVAL_MS = 1000 / TARGET_RENDER_FPS;
+let lastRenderedAt = 0;
 const cycloramaBackgroundSettings: CycloramaBackgroundSettings = {
   preset: CYCLO_BACKGROUND_DEFAULT,
 };
@@ -572,6 +574,7 @@ const cinematicSettings = {
   warmHighlights: 0.018,
   blackLift: 0.009,
 };
+const DRESS_MATERIAL_GRAIN_STRENGTH = 0.132;
 const TABLA_RASA_ACCENT_COLORS = [
   0xfdfefe,
   0xf0f4f7,
@@ -1318,18 +1321,54 @@ const mewTitleOverlayMaterial = new THREE.ShaderMaterial({
     uniform float uBlackOpacity;
     varying vec2 vUv;
 
+    float piecewiseRamp(float value, float a, float b, float c, float d, float e, float f, float g, float h) {
+      if (value < a) return mix(0.0, b, value / a);
+      if (value < c) return mix(b, d, (value - a) / (c - a));
+      if (value < e) return mix(d, 1.0, (value - c) / (e - c));
+      if (value < f) return 1.0;
+      if (value < g) return mix(1.0, h, (value - f) / (g - f));
+      if (value < 0.95) return mix(h, 0.1, (value - g) / (0.95 - g));
+      return mix(0.1, 0.0, (value - 0.95) / 0.05);
+    }
+
+    float mainCanvasMask(vec2 uv) {
+      // Mirrors the main Mew canvas's two CSS mask gradients. The visible
+      // canvas is alpha-composited over white after this mask is applied.
+      float horizontal = piecewiseRamp(uv.x, 0.05, 0.1, 0.12, 0.52, 0.24, 0.76, 0.88, 0.52);
+      float vertical = piecewiseRamp(uv.y, 0.04, 0.12, 0.09, 0.55, 0.15, 0.75, 0.87, 0.5);
+      return horizontal * vertical;
+    }
+
     void main() {
       // Mask RGB is irrelevant; its alpha defines the letter silhouettes.
       vec4 mask = texture2D(uMask, vUv);
-      // The captured background is shifted so the colors visible inside the
-      // letters align with the composition beneath the HTML title.
-      vec2 backgroundUv = vec2(vUv.x, clamp(vUv.y - 0.18, 0.0, 1.0));
-      vec3 backgroundColor = texture2D(uBackground, backgroundUv).rgb;
+      // Keep the word in its editorial position while sampling the visible
+      // chromatic field behind the dress.
+      vec2 backgroundUv = vec2(vUv.x, clamp(vUv.y, 0.0, 1.0));
+      vec4 background = texture2D(uBackground, backgroundUv);
+      // The main canvas fades through alpha into the white Mew page. Sampling
+      // only RGB would expose transparent pixels' darker stored color instead
+      // of the exact color actually visible behind the dress.
+      vec3 backgroundColor = mix(
+        vec3(1.0),
+        background.rgb,
+        clamp(background.a * mainCanvasMask(backgroundUv), 0.0, 1.0)
+      );
       // uBlackOpacity is an interpolation amount, not material opacity:
       // 0 = exact background color in the stencil
       // 1 = black title color in the stencil
-      vec3 titleColor = mix(backgroundColor, vec3(0.043), uBlackOpacity);
-      gl_FragColor = vec4(titleColor, mask.a);
+
+    vec3 titleColor = mix(backgroundColor, vec3(0.043), uBlackOpacity);
+
+    // mask.a = full silhouette: border + letters
+    // mask.r = inner letters only, because canvas fill is white
+    float fullShape = mask.a;
+    float innerLetters = mask.r;
+
+    // Border gets black. Letter interior keeps the existing title behavior.
+    vec3 finalColor = mix(vec3(0.0), titleColor, innerLetters);
+
+    gl_FragColor = vec4(finalColor, fullShape);
     }
   `,
   transparent: true,
@@ -1456,8 +1495,9 @@ const subjectMotion: SubjectMotionState = {
   baseCameraPosition: camera.position.clone(),
   baseFocusTarget: focusTarget.clone(),
 };
-let gui: GUI | null = null;
 let queuedResizeFrame = 0;
+let queuedMewTitleOverlayFrame = 0;
+let mewTitleOverlayDirty = true;
 let editorialRailRevealTimeout = 0;
 let dialecticPaperTextureEnabled = false;
 
@@ -1473,8 +1513,12 @@ void start();
 // loading cover disappears. The animation loop starts only after that critical
 // path; secondary dresses and ghost versions load afterward in the background.
 async function start() {
-  setLoadingOverlay('Loading selected dress');
-  await loadDressAsset(dressAssetSettings.asset, true);
+  if (!silentMewReload) {
+    setLoadingOverlay('Loading selected dress');
+  }
+
+  await loadDressAsset(dressAssetSettings.asset, !silentMewReload);
+
   hideLoadingOverlay();
   scheduleGhostDressLoads();
   animate();
@@ -1885,6 +1929,21 @@ function animate(timestamp?: number) {
   // requestAnimationFrame runs shortly before the browser paints. Never assume
   // a fixed 1/60 second step: background tabs pause and high-refresh displays
   // may call this 120+ times per second.
+  
+  const now = timestamp ?? performance.now();
+
+  if (document.hidden) {
+    animationFrame = window.requestAnimationFrame(animate);
+    return;
+  }
+
+  if (lastRenderedAt > 0 && now - lastRenderedAt < TARGET_RENDER_INTERVAL_MS) {
+    animationFrame = window.requestAnimationFrame(animate);
+    return;
+  }
+
+  lastRenderedAt = now;
+
   timer.update(timestamp);
   const delta = timer.getDelta();
 
@@ -1969,6 +2028,7 @@ function animate(timestamp?: number) {
   }
   syncIvoryBackgroundOpticsPass(ivoryThemeActive);
   syncCinematicFinishPass();
+  syncDressMaterialEffectUniforms();
   syncMewAlphaFeatherPass(invisibleCitiesActive);
   syncMewAlphaFeatherPass(invisibleCitiesActive, mewTitleBackgroundAlphaFeatherPass);
 
@@ -2046,6 +2106,10 @@ function getVisibleSubjectObjects() {
 }
 
 function renderMewForeground(delta: number) {
+  if (mewTitleOverlayDirty) {
+    mewTitleOverlayDirty = !updateMewTitleOverlayTexture();
+  }
+
   // Capture the title's live background without crossing WebGL contexts. The
   // base canvas is rendered by `renderer`; copying that canvas into the
   // foreground renderer used texSubImage2D and could retain stale dimensions
@@ -2378,7 +2442,7 @@ function normalizeWheelDelta(event: WheelEvent) {
 
 function shouldIgnoreMewHoloScrollEvent(event: Event) {
   const target = event.target instanceof Element ? event.target : null;
-  return Boolean(target?.closest('.lil-gui, .background-switcher, button, input, select, textarea'));
+  return Boolean(target?.closest('.background-switcher, button, input, select, textarea'));
 }
 
 async function advanceMewHoloScrollDress() {
@@ -5197,6 +5261,7 @@ function applyCycloramaBackgroundPreset(presetId: CycloramaBackgroundPresetId) {
   const useSignalBlack = preset.textureMode === 'signal-black';
   cycloramaBackgroundSettings.preset = presetId;
   stageElement!.dataset.backgroundPreset = presetId;
+  mewTitleOverlayDirty = true;
   syncCycloramaBackgroundUniforms();
   syncInfiniteBackdropMode();
 
@@ -5413,9 +5478,18 @@ function isCycloramaBackgroundPresetId(value: unknown): value is CycloramaBackgr
 function handleCycloramaBackgroundClick(event: MouseEvent) {
   const presetId = (event.currentTarget as HTMLButtonElement).dataset.backgroundPreset;
 
-  if (isCycloramaBackgroundPresetId(presetId)) {
-    applyCycloramaBackgroundPreset(presetId);
+  if (!isCycloramaBackgroundPresetId(presetId)) {
+    return;
   }
+
+  if (presetId === 'mew-holo' && cycloramaBackgroundSettings.preset !== 'mew-holo') {
+    writeThemeToUrl(presetId);
+    sessionStorage.setItem('silent-mew-reload', '1');
+    window.location.reload();
+    return;
+  }
+
+  applyCycloramaBackgroundPreset(presetId);
 }
 
 function updateCycloramaBackgroundUrl(presetId: CycloramaBackgroundPresetId) {
@@ -5463,7 +5537,8 @@ function handleTuningControlsShortcut(event: KeyboardEvent) {
   ) {
     event.preventDefault();
     const visible = stageElement.dataset.tuningControls === 'true';
-    stageElement.dataset.tuningControls = visible ? 'false' : 'true';
+    const nextVisible = !visible;
+    stageElement.dataset.tuningControls = nextVisible ? 'true' : 'false';
   }
 }
 
@@ -5728,6 +5803,18 @@ function syncCinematicFinishPass() {
   syncCinematicUniforms(mewTitleBackgroundCinematicFinishPass);
 }
 
+function syncDressMaterialEffectUniforms() {
+  // Keep the dress on the existing direct render path. This updates only the
+  // material-level grain uniforms, so it does not change tone mapping, alpha
+  // compositing, lighting, bloom, diffusion, halation, vignette, or color grade.
+  syncDressMaterialGrain({
+    time: shaderTime,
+    resolutionWidth: Math.max(1, canvasElement.width),
+    resolutionHeight: Math.max(1, canvasElement.height),
+    filmGrain: DRESS_MATERIAL_GRAIN_STRENGTH,
+  });
+}
+
 function syncCinematicUniforms(pass: ShaderPass) {
   // Updating uniforms mutates small values already attached to the compiled GPU
   // program; it does not rebuild the shader or composer.
@@ -5886,6 +5973,25 @@ function queueCanvasResize() {
   });
 }
 
+function queueMewTitleOverlayTextureUpdate() {
+  mewTitleOverlayDirty = true;
+
+  if (queuedMewTitleOverlayFrame) {
+    window.cancelAnimationFrame(queuedMewTitleOverlayFrame);
+  }
+
+  // Theme CSS can move the canvas from the Blue pane into the centered Mew
+  // layout. Measure after that layout has committed, rather than preserving a
+  // zero-sized hidden word from a hard load on another theme.
+  queuedMewTitleOverlayFrame = window.requestAnimationFrame(() => {
+    queuedMewTitleOverlayFrame = 0;
+
+    if (!disposed) {
+      mewTitleOverlayDirty = !updateMewTitleOverlayTexture();
+    }
+  });
+}
+
 function resize() {
   const canvasBounds = canvasElement.getBoundingClientRect();
   const width = Math.max(1, Math.round(canvasBounds.width || window.innerWidth));
@@ -5898,7 +6004,7 @@ function resize() {
   mewForegroundRenderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
   mewForegroundRenderer.setSize(width, height, false);
   mewTitleBackgroundComposer.setSize(width, height);
-  updateMewTitleOverlayTexture();
+  queueMewTitleOverlayTextureUpdate();
   // Every offscreen render target must match the canvas or it will be stretched,
   // blurry, and sampled with incorrect texel sizes.
   composer.setSize(width, height);
@@ -5915,9 +6021,6 @@ function resize() {
   renderDressThumbnails();
   bokehUniforms.aspect.value = camera.aspect;
 
-  if (window.innerWidth < 720) {
-    gui?.close();
-  }
 
   buildIvoryPortal();
   buildSignalDiptych();
@@ -5925,21 +6028,26 @@ function resize() {
 
 function updateMewTitleOverlayTexture() {
   if (!mewTitleWordElement) {
-    return;
+    return false;
   }
 
   const canvasBounds = canvasElement.getBoundingClientRect();
   const width = Math.max(1, canvasElement.width);
   const height = Math.max(1, canvasElement.height);
   if (canvasBounds.width <= 0 || canvasBounds.height <= 0) {
-    return;
+    return false;
   }
 
-  if (mewTitleOverlayCanvas.width !== width || mewTitleOverlayCanvas.height !== height) {
-    mewTitleOverlayCanvas.width = width;
-    mewTitleOverlayCanvas.height = height;
-  } else {
+  // Assigning the backing dimensions resets the 2D bitmap and drawing state.
+  // A title update is rare (theme/layout changes only), and this prevents a
+  // hidden theme's stale glyphs from surviving into the first Mew frame.
+  mewTitleOverlayCanvas.width = width;
+  mewTitleOverlayCanvas.height = height;
+
+  if (cycloramaBackgroundSettings.preset !== 'mew-holo') {
     mewTitleOverlayContext.clearRect(0, 0, width, height);
+    mewTitleOverlayTexture.needsUpdate = true;
+    return false;
   }
 
   const range = document.createRange();
@@ -5947,12 +6055,19 @@ function updateMewTitleOverlayTexture() {
   const wordBounds = range.getBoundingClientRect();
   range.detach();
 
+  if (wordBounds.width <= 0 || wordBounds.height <= 0) {
+    mewTitleOverlayContext.clearRect(0, 0, width, height);
+    mewTitleOverlayTexture.needsUpdate = true;
+    return false;
+  }
+
   const style = window.getComputedStyle(mewTitleWordElement);
   const scaleX = width / canvasBounds.width;
   const scaleY = height / canvasBounds.height;
   const fontSize = Number.parseFloat(style.fontSize) * scaleY;
   const letterSpacing = Number.parseFloat(style.letterSpacing) * scaleX;
   const text = mewTitleWordElement.textContent?.trim() || 'System';
+  
   const x = (wordBounds.left - canvasBounds.left) * scaleX;
   const top = (wordBounds.top - canvasBounds.top) * scaleY;
 
@@ -5971,11 +6086,24 @@ function updateMewTitleOverlayTexture() {
   mewTitleOverlayContext.save();
   mewTitleOverlayContext.translate(x, baseline);
   mewTitleOverlayContext.scale(targetWidth / measuredWidth, 1);
-  mewTitleOverlayContext.globalAlpha = 1;
-  mewTitleOverlayContext.fillStyle = '#0b0b0b';
-  mewTitleOverlayContext.fillText(text, 0, 0);
+mewTitleOverlayContext.globalAlpha = 1;
+
+// Draw a clean outside border into the mask texture.
+// Black stroke = border marker.
+mewTitleOverlayContext.lineJoin = 'round';
+mewTitleOverlayContext.miterLimit = 2;
+const titleBorderWidth = fontSize * 0.01;
+mewTitleOverlayContext.lineWidth = titleBorderWidth;
+mewTitleOverlayContext.strokeStyle = '#000000';
+mewTitleOverlayContext.strokeText(text, 0, 0);
+
+// White fill = inner-letter marker.
+// This is NOT the visible color. The shader still decides visible fill color.
+mewTitleOverlayContext.fillStyle = '#ffffff';
+mewTitleOverlayContext.fillText(text, 0, 0);
   mewTitleOverlayContext.restore();
   mewTitleOverlayTexture.needsUpdate = true;
+  return true;
 }
 
 // Différance portal: a near-black arch with knockout type that reveals the live
@@ -6429,62 +6557,14 @@ function getBackViewAmount(yaw: number) {
   return THREE.MathUtils.smoothstep(backFacing, 0.04, 1);
 }
 
-function createGui() {
-  const gui = new GUI({ title: 'Dress wind' });
-  const applyPreset = (preset: DressWindSettings) => {
-    Object.assign(settings, preset);
-    resetDressWind();
-    gui.controllersRecursive().forEach((controller) => controller.updateDisplay());
-  };
-
-  gui.add(settings, 'windStrength', 0, 0.11, 0.001).name('wind strength');
-  gui.add(settings, 'fabricLooseness', 0.15, 1.2, 0.01).name('fabric looseness');
-  gui.add(settings, 'flutter', 0, 1.0, 0.01).name('flutter detail');
-  gui.add(settings, 'gustRadius', 0.12, 0.72, 0.01).name('cursor radius');
-  gui.add(settings, 'followSpeed', 4, 28, 0.1).name('follow speed');
-  gui.add(settings, 'fadeSpeed', 1.2, 8, 0.1).name('fade at rest');
-  gui.add(settings, 'freezeTime').name('freeze time');
-  gui.add(dressAssetSettings, 'asset', DRESS_ASSET_GUI_OPTIONS).name('dress').onChange((assetId: DressAssetId) => {
-    void loadDressAsset(assetId);
-  });
-  gui.add(cycloramaBackgroundSettings, 'preset', CYCLO_BACKGROUND_GUI_OPTIONS).name('cyclo bg').onChange((presetId: CycloramaBackgroundPresetId) => {
-    applyCycloramaBackgroundPreset(presetId);
-  });
-  const finishFolder = gui.addFolder('Cinematic finish');
-  finishFolder.add(cinematicSettings, 'enabled').name('enabled').onChange(syncCinematicFinishPass);
-  finishFolder.add(cinematicSettings, 'filmGrain', 0, 0.06, 0.001).name('film grain').onChange(syncCinematicFinishPass);
-  finishFolder.add(cinematicSettings, 'diffusion', 0, 0.06, 0.001).name('diffusion').onChange(syncCinematicFinishPass);
-  finishFolder.add(cinematicSettings, 'halation', 0, 0.12, 0.001).name('halation').onChange(syncCinematicFinishPass);
-  finishFolder.add(cinematicSettings, 'vignette', 0, 0.08, 0.001).name('vignette').onChange(syncCinematicFinishPass);
-  finishFolder.add(cinematicSettings, 'saturation', 0.8, 1.25, 0.001).name('saturation').onChange(syncCinematicFinishPass);
-  finishFolder.add(cinematicSettings, 'contrast', 0.85, 1.15, 0.001).name('contrast').onChange(syncCinematicFinishPass);
-  finishFolder.close();
-  const ivoryOpticsFolder = gui.addFolder('Différance optics');
-  ivoryOpticsFolder.add(ivoryBackgroundOpticsSettings, 'strength', 0, 0.09, 0.001).name('breath strength');
-  ivoryOpticsFolder.add(ivoryBackgroundOpticsSettings, 'radiusScale', 0.55, 1.65, 0.01).name('breath radius');
-  ivoryOpticsFolder.add(ivoryBackgroundOpticsSettings, 'pulseSpeed', 0.2, 1.8, 0.01).name('breath speed');
-  ivoryOpticsFolder.close();
-
-  const presets = {
-    editorial: () => applyPreset(DRESS_WIND_PRESETS.editorial),
-    quiet: () => applyPreset(DRESS_WIND_PRESETS.quiet),
-  };
-  const presetFolder = gui.addFolder('Presets');
-  presetFolder.add(presets, 'editorial').name('editorial wind');
-  presetFolder.add(presets, 'quiet').name('quiet movement');
-
-  if (showControls) {
-    gui.open();
-  } else {
-    gui.close();
-    gui.domElement.classList.add('is-hidden');
-  }
-
-  return gui;
-}
-
-gui = createGui();
+syncDressMaterialEffectUniforms();
 resize();
+const canvasResizeObserver = new ResizeObserver(queueCanvasResize);
+canvasResizeObserver.observe(canvasElement);
+const mewTitleLayoutObserver = new ResizeObserver(queueMewTitleOverlayTextureUpdate);
+if (mewTitleWordElement) {
+  mewTitleLayoutObserver.observe(mewTitleWordElement);
+}
 canvasElement.addEventListener('pointermove', handlePointerMove, { passive: true });
 canvasElement.addEventListener('pointerdown', handleCanvasPointerDown);
 canvasElement.addEventListener('pointerleave', handlePointerLeave, { passive: true });
@@ -6537,6 +6617,12 @@ function dispose() {
     window.cancelAnimationFrame(queuedResizeFrame);
     queuedResizeFrame = 0;
   }
+  if (queuedMewTitleOverlayFrame) {
+    window.cancelAnimationFrame(queuedMewTitleOverlayFrame);
+    queuedMewTitleOverlayFrame = 0;
+  }
+  canvasResizeObserver.disconnect();
+  mewTitleLayoutObserver.disconnect();
   canvasElement.removeEventListener('pointermove', handlePointerMove);
   canvasElement.removeEventListener('pointerdown', handleCanvasPointerDown);
   canvasElement.removeEventListener('pointerleave', handlePointerLeave);
@@ -6570,8 +6656,6 @@ function dispose() {
   dressThumbnailRecords.clear();
   ghostPickTargets.length = 0;
   controls.dispose();
-  gui?.destroy();
-  gui = null;
   composer.dispose();
   subjectFxComposer.dispose();
   subjectFxRenderTarget.dispose();

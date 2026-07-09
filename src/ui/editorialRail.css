@@ -147,9 +147,6 @@
   background: rgba(242, 233, 218, 0.2);
 }
 
-.editorial-rail__theme[data-active="true"]::before {
-  background: var(--rail-accent);
-}
 
 .editorial-rail__theme-index {
   padding-top: 2px;
