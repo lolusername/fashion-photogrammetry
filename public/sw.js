@@ -1,4 +1,6 @@
-const CACHE_NAME = 'fashion-system-runtime-v1';
+// Bump the cache namespace to remove stale runtime assets from existing mobile
+// Safari installations as soon as this worker update activates.
+const CACHE_NAME = 'fashion-system-runtime-v2';
 const CACHEABLE_ASSET = /\.(?:glb|jpg|jpeg|png|svg|webp)$/i;
 const HASHED_BUILD_ASSET = /^\/assets\/.+\.(?:css|js)$/i;
 const ITERATED_ASSET = /^\/patchwork_dress_latest\.glb$/i;
