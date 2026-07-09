@@ -566,6 +566,7 @@ const CYCLO_TEXTURE_FALLBACK_ASPECT = 663 / 617;
 // trades a small amount of sharpness for substantially fewer shaded pixels.
 const MAX_PIXEL_RATIO = 1.5;
 const MOBILE_MAX_PIXEL_RATIO = 1;
+const MOBILE_EFFECT_PIXEL_RATIO = 0.75;
 
 function usesMobileRenderProfile() {
   return window.matchMedia('(max-width: 720px), (pointer: coarse)').matches;
@@ -574,6 +575,10 @@ function usesMobileRenderProfile() {
 function getRenderPixelRatio() {
   const maximum = usesMobileRenderProfile() ? MOBILE_MAX_PIXEL_RATIO : MAX_PIXEL_RATIO;
   return Math.min(window.devicePixelRatio, maximum);
+}
+
+function getEffectPixelRatio() {
+  return usesMobileRenderProfile() ? MOBILE_EFFECT_PIXEL_RATIO : getRenderPixelRatio();
 }
 
 const TARGET_RENDER_FPS = 60;
@@ -2301,8 +2306,16 @@ function resizeMewForegroundPipeline(pipeline: MewForegroundPipeline, width: num
   pipeline.renderer.setSize(width, height, false);
   resetMewForegroundScreenTarget(pipeline.renderer);
   pipeline.renderer.clear(true, true, true);
-  pipeline.titleBackgroundComposer.setSize(width, height);
-  pipeline.subjectBloomPipeline.composer.setSize(width, height);
+  resizeEffectComposer(pipeline.titleBackgroundComposer, width, height);
+  resizeEffectComposer(pipeline.subjectBloomPipeline.composer, width, height);
+}
+
+function resizeEffectComposer(composer: EffectComposer, width: number, height: number) {
+  // Post-processing remains enabled on mobile. Its intermediate render targets
+  // use a reduced scale so Safari has room for the visible renderer, garment,
+  // and theme geometry without forcing a WebContent memory termination.
+  composer.setPixelRatio(getEffectPixelRatio());
+  composer.setSize(width, height);
 }
 
 function renderSharpSubjectOverlay(
@@ -6157,10 +6170,10 @@ function resize() {
   queueMewTitleOverlayTextureUpdate();
   // Every offscreen render target must match the canvas or it will be stretched,
   // blurry, and sampled with incorrect texel sizes.
-  composer.setSize(width, height);
-  subjectFxComposer.setSize(width, height);
-  sharpSubjectComposer.setSize(width, height);
-  subjectBloomPipeline.composer.setSize(width, height);
+  resizeEffectComposer(composer, width, height);
+  resizeEffectComposer(subjectFxComposer, width, height);
+  resizeEffectComposer(sharpSubjectComposer, width, height);
+  resizeEffectComposer(subjectBloomPipeline.composer, width, height);
   camera.aspect = width / height;
   // applyResponsiveCamera updates fov/position and ultimately the projection
   // matrix. Changing aspect without a projection update distorts the view.
