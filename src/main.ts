@@ -618,7 +618,7 @@ const cinematicSettings = {
   warmHighlights: 0.018,
   blackLift: 0.009,
 };
-const DRESS_MATERIAL_GRAIN_STRENGTH = 0.08;
+const DRESS_MATERIAL_GRAIN_STRENGTH = 0.04;
 const TABLA_RASA_ACCENT_COLORS = [
   0xfdfefe,
   0xf0f4f7,
@@ -2150,7 +2150,7 @@ function animate(timestamp?: number) {
   const ivoryThemeActive = cycloramaBackgroundSettings.preset === 'ivory-holo';
   const signalThemeActive = cycloramaBackgroundSettings.preset === 'signal-black';
   const objectPostThemeActive = invisibleCitiesActive || ivoryThemeActive;
-  const objectBlurAmount = invisibleCitiesActive ? 0.018 : ivoryThemeActive ? 0.038 : 0;
+  const objectBlurAmount = invisibleCitiesActive ? 0.09 : ivoryThemeActive ? 0.038 : 0;
 
   // Bloom vocabulary:
   // - threshold: minimum luminance that contributes,
@@ -2169,7 +2169,7 @@ function animate(timestamp?: number) {
     : ivoryThemeActive
     ? 0.018
     : invisibleCitiesActive
-    ? 0.07 * (1 + pointerWind.activity * 0.28)
+    ? 0.1 * (1 + pointerWind.activity * 0.28)
     : signalThemeActive
     ? 0.01
     : BLOOM_BASE_STRENGTH + pointerWind.activity * BLOOM_WIND_STRENGTH;

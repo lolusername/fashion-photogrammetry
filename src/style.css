@@ -701,8 +701,7 @@ select {
 
   .stage[data-background-preset="mew-holo"]
   .mew-editorial-page__copy--right {
-    right: 14px;
-    bottom: 110px;
+    display: none;
   }
   .mew-editorial-page__mast {
     top: 16px;
