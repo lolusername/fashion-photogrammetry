@@ -575,9 +575,9 @@ const CYCLO_TEXTURE_REPEAT_X = 3.25;
 const CYCLO_TEXTURE_FALLBACK_ASPECT = 663 / 617;
 // Browser pixel ratio may be 2 or 3 on high-density displays. Capping it at 1.5
 // trades a small amount of sharpness for substantially fewer shaded pixels.
-const MAX_PIXEL_RATIO = 1.5;
-const MOBILE_MAX_PIXEL_RATIO = 1;
-const MOBILE_EFFECT_PIXEL_RATIO = 1.5;
+const MAX_PIXEL_RATIO = 2;
+const MOBILE_MAX_PIXEL_RATIO = 2;
+const MOBILE_EFFECT_PIXEL_RATIO = 1;
 
 function usesMobileRenderProfile() {
   return window.matchMedia('(max-width: 720px), (pointer: coarse)').matches;
