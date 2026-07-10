@@ -241,7 +241,7 @@ select {
 .stage[data-background-preset="blue"][data-dialectic-surface="paper"] .blue-editorial-panel {
   background:
     radial-gradient(circle at 62% 14%, rgba(39, 224, 224, 0.32), transparent 28rem),
-    linear-gradient(180deg, #12b9c2 0%, #087bb5 48%, #071d58 100%);
+    linear-gradient(180deg, #12b9c2 0%, #087bb5 98%, #071d58 350%);
   color: #ffffff;
 }
 
@@ -698,12 +698,12 @@ select {
   .stage[data-background-preset="blue"] .blue-editorial-panel {
     border-bottom: 1px solid rgba(255, 255, 255, 0.72);
   }
-  .stage[data-background-preset="blue"][data-dialectic-surface="paper"] .blue-editorial-panel {
-    background:
-      radial-gradient(circle at 64% 10%, rgba(216, 242, 246, 0.12), transparent 18rem),
-      linear-gradient(180deg, #6f99a8 0%, #648d9d 52%, #587f90 100%);
-  }
 
+  .stage[data-background-preset="mew-holo"]
+  .mew-editorial-page__copy--right {
+    right: 14px;
+    bottom: 110px;
+  }
   .mew-editorial-page__mast {
     top: 16px;
     left: 12px;
