@@ -10,8 +10,11 @@
 
 .dress-navigation {
   position: fixed;
-  right: calc(var(--editorial-rail-width) + 16px);
+  left: calc((100vw - var(--editorial-rail-width)) / 2);
+  right: auto;
   bottom: 16px;
+  transform: translateX(-50%);
+
   display: grid;
   grid-template-columns: 44px minmax(112px, 1fr) 44px;
   width: 224px;
@@ -32,7 +35,9 @@
   font-size: 18px;
   cursor: pointer;
 }
-
+.experience-controls[data-theme="blue"] .dress-navigation {
+  display: none;
+}
 .dress-navigation > button:first-child {
   border-right: 1px solid var(--experience-line);
 }

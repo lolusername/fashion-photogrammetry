@@ -695,6 +695,9 @@ select {
 }
 
 @media (max-width: 720px) {
+  .stage[data-background-preset="blue"] .blue-editorial-panel {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.72);
+  }
   .stage[data-background-preset="blue"][data-dialectic-surface="paper"] .blue-editorial-panel {
     background:
       radial-gradient(circle at 64% 10%, rgba(216, 242, 246, 0.12), transparent 18rem),
@@ -712,7 +715,7 @@ select {
 
   .mew-editorial-page__mast span:last-child {
     position: absolute;
-    top: clamp(168px, 21svh, 198px);
+    top: 0.95em;
     left: 27%;
     width: 73%;
     margin: 0;
@@ -841,6 +844,18 @@ select {
   .loading-overlay__title {
     font-size: 22px;
   }
+  .stage[data-background-preset="mew-holo"] .mew-editorial-page {
+  z-index: 3;
+}
+
+.stage[data-background-preset="mew-holo"]
+.mew-editorial-page__mast span:last-child {
+  visibility: visible;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  -webkit-text-stroke: 1px #000;
+  text-shadow: none;
+}
 }
 
 @media (pointer: coarse) {

@@ -577,7 +577,7 @@ const CYCLO_TEXTURE_FALLBACK_ASPECT = 663 / 617;
 // trades a small amount of sharpness for substantially fewer shaded pixels.
 const MAX_PIXEL_RATIO = 1.5;
 const MOBILE_MAX_PIXEL_RATIO = 1;
-const MOBILE_EFFECT_PIXEL_RATIO = 0.75;
+const MOBILE_EFFECT_PIXEL_RATIO = 1.5;
 
 function usesMobileRenderProfile() {
   return window.matchMedia('(max-width: 720px), (pointer: coarse)').matches;
@@ -618,7 +618,7 @@ const cinematicSettings = {
   warmHighlights: 0.018,
   blackLift: 0.009,
 };
-const DRESS_MATERIAL_GRAIN_STRENGTH = 0.132;
+const DRESS_MATERIAL_GRAIN_STRENGTH = 0.08;
 const TABLA_RASA_ACCENT_COLORS = [
   0xfdfefe,
   0xf0f4f7,
@@ -2207,10 +2207,13 @@ function animate(timestamp?: number) {
   syncIvoryBackgroundOpticsPass(ivoryThemeActive);
   syncCinematicFinishPass();
   syncDressMaterialEffectUniforms();
-  syncMewAlphaFeatherPass(invisibleCitiesActive);
-  if (mewPipeline) {
-    syncMewAlphaFeatherPass(invisibleCitiesActive, mewPipeline.titleBackgroundAlphaFeatherPass);
-  }
+  syncMewAlphaFeatherPass(false);
+ if (mewPipeline) {
+  syncMewAlphaFeatherPass(
+    false,
+    mewPipeline.titleBackgroundAlphaFeatherPass,
+  );
+}
 
   if (dressTransitionFx > 0) {
     dressTransitionFx = Math.max(0, dressTransitionFx - delta / DRESS_TRANSITION_FX_DURATION);
@@ -2403,7 +2406,7 @@ function renderMewMobile(delta: number) {
     renderer.setScissor(0, 0, width, height);
     renderer.setScissorTest(false);
     renderer.autoClear = false;
-    renderer.render(mewTitleOverlayScene, mewTitleOverlayCamera);
+    // renderer.render(mewTitleOverlayScene, mewTitleOverlayCamera);
     renderer.clearDepth();
     renderer.render(scene, camera);
     renderSubjectBloom(delta, subjectBloomPipeline);
@@ -2905,9 +2908,7 @@ function initializeDressThumbnails() {
   // These thumbnails are not visible in the mobile controls. Avoiding their
   // independent WebGL contexts leaves the full render budget for the dress,
   // title field, and every visible post effect.
-  if (usesMobileRenderProfile()) {
-    return;
-  }
+
 
   dressThumbnailCanvases.forEach((thumbnailCanvas) => {
     const assetId = thumbnailCanvas.dataset.dressThumbnail;
@@ -6366,20 +6367,21 @@ function updateMewTitleOverlayTexture() {
   mewTitleOverlayContext.scale(targetWidth / measuredWidth, 1);
   mewTitleOverlayContext.globalAlpha = 1;
 
-  if (!usesMobileRenderProfile()) {
+  if (true) {
     // Desktop keeps the authored outline treatment. On mobile the same outline
     // consumes too much of the reduced glyph area, so its alpha mask is a
     // single solid silhouette instead.
     mewTitleOverlayContext.lineJoin = 'round';
     mewTitleOverlayContext.miterLimit = 2;
-    mewTitleOverlayContext.lineWidth = fontSize * 0.01;
+    mewTitleOverlayContext.lineWidth =
+    fontSize * (usesMobileRenderProfile() ? 0.04 : 0.01);
     mewTitleOverlayContext.strokeStyle = '#000000';
     mewTitleOverlayContext.strokeText(text, 0, 0);
   }
 
 // White fill = inner-letter marker.
 // This is NOT the visible color. The shader still decides visible fill color.
-mewTitleOverlayContext.fillStyle = '#ffffff';
+mewTitleOverlayContext.fillStyle = '#0000';
 mewTitleOverlayContext.fillText(text, 0, 0);
   mewTitleOverlayContext.restore();
   mewTitleOverlayTexture.needsUpdate = true;

@@ -27,7 +27,7 @@ export function createEditorialRail(options: EditorialRailOptions): EditorialRai
     <header class="editorial-rail__header">
       <span class="editorial-rail__identity">
         <span class="editorial-rail__monogram" aria-hidden="true">FS</span>
-        <span class="editorial-rail__title">Three studies</span>
+        <span class="editorial-rail__title">3 studies</span>
       </span>
       <button
         class="editorial-rail__toggle"

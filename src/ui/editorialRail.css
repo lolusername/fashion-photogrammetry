@@ -113,7 +113,7 @@
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr);
   gap: 7px;
-  min-height: 86px;
+  min-height: 44px;
   padding: 12px 9px;
   border: 0;
   border-bottom: 1px solid var(--rail-line);
