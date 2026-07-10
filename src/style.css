@@ -746,9 +746,13 @@ select {
     width: calc(100% - 10px);
     height: 78vh;
     height: 78svh;
+    /* Mobile Safari combines the cyan and magenta shadows into a gray halo on
+       the physical display. WebGL already supplies the field's edge glow. */
+    filter: none;
   }
 
   .stage[data-background-preset="mew-holo"] .mew-foreground-canvas {
+    display: none;
     width: calc(100% - 10px);
     height: 78vh;
     height: 78svh;
@@ -836,5 +840,15 @@ select {
 
   .loading-overlay__title {
     font-size: 22px;
+  }
+}
+
+@media (pointer: coarse) {
+  .stage[data-background-preset="mew-holo"] .stage__canvas {
+    filter: none;
+  }
+
+  .stage[data-background-preset="mew-holo"] .mew-foreground-canvas {
+    display: none;
   }
 }

@@ -10,6 +10,7 @@ export type DressAsset = {
   id: DressAssetId;
   label: string;
   url: string;
+  mobileUrl: string;
   swatch: string;
   dialecticScale: number;
   ghost: DressGhostPlacement;
@@ -24,6 +25,7 @@ export const DRESS_ASSETS: Record<DressAssetId, DressAsset> = {
     id: 'original',
     label: 'Dress 1',
     url: '/dress.glb',
+    mobileUrl: '/dress-mobile.glb',
     swatch: 'linear-gradient(135deg, #7a624c, #eee2cc)',
     dialecticScale: 1,
     ghost: {
@@ -36,6 +38,7 @@ export const DRESS_ASSETS: Record<DressAssetId, DressAsset> = {
     id: 'patchwork',
     label: 'Dress 2',
     url: '/patchwork_dress_latest.glb',
+    mobileUrl: '/patchwork_dress_mobile.glb',
     swatch: 'linear-gradient(135deg, #282328 0%, #d7c8a8 34%, #c75f40 58%, #798936 100%)',
     dialecticScale: 1,
     ghost: {

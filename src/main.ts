@@ -583,6 +583,10 @@ function usesMobileRenderProfile() {
   return window.matchMedia('(max-width: 720px), (pointer: coarse)').matches;
 }
 
+function usesSingleContextMewLayout() {
+  return usesMobileRenderProfile();
+}
+
 function getRenderPixelRatio() {
   const maximum = usesMobileRenderProfile() ? MOBILE_MAX_PIXEL_RATIO : MAX_PIXEL_RATIO;
   return Math.min(window.devicePixelRatio, maximum);
@@ -1328,6 +1332,8 @@ const mewTitleOverlayMaterial = new THREE.ShaderMaterial({
     uBackground: { value: null },
     uMask: { value: mewTitleOverlayTexture },
     uBlackOpacity: { value: 1 },
+    uBackgroundNeedsOutput: { value: 0 },
+    uToneMappingExposure: { value: 0.64 },
   },
   vertexShader: `
     varying vec2 vUv;
@@ -1341,7 +1347,40 @@ const mewTitleOverlayMaterial = new THREE.ShaderMaterial({
     uniform sampler2D uBackground;
     uniform sampler2D uMask;
     uniform float uBlackOpacity;
+    uniform float uBackgroundNeedsOutput;
+    uniform float uToneMappingExposure;
     varying vec2 vUv;
+
+    vec3 rrtAndOdtFit(vec3 value) {
+      vec3 a = value * (value + 0.0245786) - 0.000090537;
+      vec3 b = value * (0.983729 * value + 0.4329510) + 0.238081;
+      return a / b;
+    }
+
+    vec3 acesFilmicToneMapping(vec3 color) {
+      const mat3 inputMatrix = mat3(
+        vec3(0.59719, 0.07600, 0.02840),
+        vec3(0.35458, 0.90834, 0.13383),
+        vec3(0.04823, 0.01566, 0.83777)
+      );
+      const mat3 outputMatrix = mat3(
+        vec3(1.60475, -0.10208, -0.00327),
+        vec3(-0.53108, 1.10813, -0.07276),
+        vec3(-0.07367, -0.00605, 1.07602)
+      );
+      color *= uToneMappingExposure / 0.6;
+      color = inputMatrix * color;
+      color = rrtAndOdtFit(color);
+      return clamp(outputMatrix * color, 0.0, 1.0);
+    }
+
+    vec3 linearToSrgb(vec3 color) {
+      return mix(
+        pow(color, vec3(0.41666)) * 1.055 - vec3(0.055),
+        color * 12.92,
+        vec3(lessThanEqual(color, vec3(0.0031308)))
+      );
+    }
 
     float piecewiseRamp(float value, float a, float b, float c, float d, float e, float f, float g, float h) {
       if (value < a) return mix(0.0, b, value / a);
@@ -1368,6 +1407,9 @@ const mewTitleOverlayMaterial = new THREE.ShaderMaterial({
       // chromatic field behind the dress.
       vec2 backgroundUv = vec2(vUv.x, clamp(vUv.y, 0.0, 1.0));
       vec4 background = texture2D(uBackground, backgroundUv);
+      if (uBackgroundNeedsOutput > 0.5) {
+        background.rgb = linearToSrgb(acesFilmicToneMapping(background.rgb));
+      }
       // The main canvas fades through alpha into the white Mew page. Sampling
       // only RGB would expose transparent pixels' darker stored color instead
       // of the exact color actually visible behind the dress.
@@ -1702,7 +1744,7 @@ async function loadFullDressRecord(
   asset: DressAsset,
   onStage?: (stage: string) => void,
 ): Promise<FullDressRecord | null> {
-  const loaded = await loadDress(asset.url, onStage);
+  const loaded = await loadDress(getDressAssetUrl(asset), onStage);
 
   if (disposed) {
     disposeObjectResources(loaded.root);
@@ -1710,6 +1752,10 @@ async function loadFullDressRecord(
   }
 
   return createFullDressRecord(asset, loaded);
+}
+
+function getDressAssetUrl(asset: DressAsset) {
+  return usesMobileRenderProfile() ? asset.mobileUrl : asset.url;
 }
 
 function setLoadingOverlay(detail: string) {
@@ -1812,7 +1858,7 @@ async function loadDressAsset(assetId: DressAssetId, useLoadingOverlay = false) 
     dressAssetSettings.asset = activeFullDress?.asset.id ?? DRESS_ASSET_DEFAULT;
     updateDressAssetButtons(false);
     updateGhostVisibility();
-    statusElement.textContent = error instanceof Error ? error.message : `Failed to load ${asset.url}`;
+    statusElement.textContent = error instanceof Error ? error.message : `Failed to load ${getDressAssetUrl(asset)}`;
     statusElement.dataset.error = 'true';
   } finally {
     if (token === dressLoadToken) {
@@ -2190,8 +2236,14 @@ function animate(timestamp?: number) {
       });
     }
     if (invisibleCitiesActive) {
-      // This theme uses the second transparent canvas and title-mask ordering.
-      renderMewForeground(delta);
+      if (usesSingleContextMewLayout()) {
+        // Mobile preserves the title stencil and subject effects in the primary
+        // context, avoiding a second upload of the complete GLB.
+        renderMewMobile(delta);
+      } else {
+        // Desktop retains the original transparent-canvas title-mask ordering.
+        renderMewForeground(delta);
+      }
     } else {
       renderSharpSubjectOverlay(delta);
     }
@@ -2250,6 +2302,7 @@ function renderMewForeground(delta: number) {
   if (mewTitleOverlayDirty) {
     mewTitleOverlayDirty = !updateMewTitleOverlayTexture();
   }
+  mewTitleOverlayMaterial.uniforms.uBackgroundNeedsOutput.value = 0;
 
   // Capture the title's live background without crossing WebGL contexts. The
   // base canvas is rendered by `renderer`; copying that canvas into the
@@ -2310,6 +2363,53 @@ function renderMewForeground(delta: number) {
     pipeline.renderer.autoClear = true;
     scene.background = previousBackground;
     scene.environment = previousEnvironment;
+    hiddenObjects.forEach((object, index) => {
+      object.visible = previousVisibility[index];
+    });
+  }
+}
+
+function renderMewMobile(delta: number) {
+  if (mewTitleOverlayDirty) {
+    mewTitleOverlayDirty = !updateMewTitleOverlayTexture();
+  }
+  // The main composer has just rendered the subject-free chromatic field. Its
+  // read buffer is already available in this context, so the title can sample
+  // it without allocating another full post-processing chain.
+  mewTitleOverlayMaterial.uniforms.uBackground.value = composer.readBuffer.texture;
+  mewTitleOverlayMaterial.uniforms.uBackgroundNeedsOutput.value = 1;
+  mewTitleOverlayMaterial.uniforms.uToneMappingExposure.value = renderer.toneMappingExposure;
+  const previousAutoClear = renderer.autoClear;
+
+  const hiddenObjects: THREE.Object3D[] = [];
+  [cycloramaMesh, infiniteBackdropMesh, holoAccentGroup, ivorySculptureGroup, photoPrintGroup, windArchiveDressShadow, dialecticHalftoneShadow, yellowBacking, paperRollMesh].forEach((object) => {
+    if (object) {
+      hiddenObjects.push(object);
+    }
+  });
+  const previousVisibility = hiddenObjects.map((object) => object.visible);
+  const previousBackground = scene.background;
+
+  hiddenObjects.forEach((object) => {
+    object.visible = false;
+  });
+  scene.background = null;
+
+  try {
+    const width = Math.max(1, Math.round(canvasElement.clientWidth));
+    const height = Math.max(1, Math.round(canvasElement.clientHeight));
+    renderer.setRenderTarget(null);
+    renderer.setViewport(0, 0, width, height);
+    renderer.setScissor(0, 0, width, height);
+    renderer.setScissorTest(false);
+    renderer.autoClear = false;
+    renderer.render(mewTitleOverlayScene, mewTitleOverlayCamera);
+    renderer.clearDepth();
+    renderer.render(scene, camera);
+    renderSubjectBloom(delta, subjectBloomPipeline);
+  } finally {
+    renderer.autoClear = previousAutoClear;
+    scene.background = previousBackground;
     hiddenObjects.forEach((object, index) => {
       object.visible = previousVisibility[index];
     });
@@ -3030,7 +3130,7 @@ function waitForGhostLoadTurn() {
 
 async function loadGhostDress(assetId: DressAssetId): Promise<GhostDressRecord> {
   const asset = DRESS_ASSETS[assetId];
-  const loaded = await loadDress(asset.url);
+  const loaded = await loadDress(getDressAssetUrl(asset));
   const material = new THREE.LineBasicMaterial({
     color: 0xf7efe5,
     transparent: true,
@@ -5431,12 +5531,13 @@ function applyCycloramaBackgroundPreset(presetId: CycloramaBackgroundPresetId) {
   const preset = CYCLO_BACKGROUND_PRESETS[presetId];
   const useIvoryHolo = preset.textureMode === 'ivory-holo';
   const useSignalBlack = preset.textureMode === 'signal-black';
-  const previousPreset = cycloramaBackgroundSettings.preset;
   cycloramaBackgroundSettings.preset = presetId;
   stageElement!.dataset.backgroundPreset = presetId;
-  if (presetId === 'mew-holo') {
+  if (presetId === 'mew-holo' && usesSingleContextMewLayout()) {
+    disposeMewForegroundPipeline();
+  } else if (presetId === 'mew-holo') {
     ensureMewForegroundPipeline();
-  } else if (previousPreset === 'mew-holo') {
+  } else {
     disposeMewForegroundPipeline();
   }
   mewTitleOverlayDirty = true;
@@ -6180,8 +6281,12 @@ function resize() {
   // `false` means do not overwrite CSS width/height; layout owns CSS size while
   // the renderer controls the internal drawing-buffer resolution.
   renderer.setSize(width, height, false);
-  if (mewForegroundPipeline) {
-    resizeMewForegroundPipeline(mewForegroundPipeline, width, height);
+  if (cycloramaBackgroundSettings.preset === 'mew-holo' && usesSingleContextMewLayout()) {
+    disposeMewForegroundPipeline();
+  } else if (cycloramaBackgroundSettings.preset === 'mew-holo') {
+    resizeMewForegroundPipeline(ensureMewForegroundPipeline(), width, height);
+  } else {
+    disposeMewForegroundPipeline();
   }
   queueMewTitleOverlayTextureUpdate();
   // Every offscreen render target must match the canvas or it will be stretched,
