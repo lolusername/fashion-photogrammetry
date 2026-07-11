@@ -178,7 +178,6 @@ export type GhostDressRecord = {
 export type DressThumbnailRecord = {
   assetId: DressAssetId;
   canvas: HTMLCanvasElement;
-  renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   root: THREE.Group | null;

@@ -10,7 +10,6 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
-import { loadDress, type LoadedDress } from './loadDress';
 import {
   CYCLO_BACKGROUND_PRESETS,
   PUBLIC_THEMES,
@@ -22,7 +21,6 @@ import {
   DRESS_ASSETS,
   DRESS_ASSET_ORDER,
   isDressAssetId,
-  type DressAsset,
   type DressAssetId,
 } from './config/dresses';
 import { readInitialExperienceState, writeDressToUrl, writeThemeToUrl } from './state/urlState';
@@ -41,17 +39,11 @@ import type {
   BlueDressHoverState,
   CycloramaBackgroundSettings,
   CycloramaBackgroundUniforms,
-  DressThumbnailRecord,
   FullDressRecord,
-  GhostDressRecord,
-  HoloSculptureMotion,
   InfiniteBackdropUniforms,
   MewForegroundPipeline,
   MewHoloScrollState,
-  PaletteMaterial,
-  PhotoPrintParticle,
   PointerWindState,
-  ScreenSpaceBounds,
   SubjectBloomPipeline,
   SubjectMotionState,
   SubjectTransitionPipeline,
@@ -63,15 +55,6 @@ import {
   BLOOM_THRESHOLD,
   BLOOM_WIND_RADIUS,
   BLOOM_WIND_STRENGTH,
-  BLUE_DRESS_HOVER_IDLE_SECONDS,
-  BLUE_DRESS_HOVER_TURN_RESPONSE,
-  BLUE_DRESS_HOVER_YAW_LIMIT,
-  BLUE_DRESS_RETURN_EASE,
-  BLUE_DRESS_ROTATION_EASE,
-  CAMERA_BACK_DISTANCE_MULTIPLIER,
-  CAMERA_MAX_LIFT,
-  CAMERA_VERTICAL_EASE,
-  CAMERA_VERTICAL_RESPONSE,
   CYCLO_BACK_Z,
   CYCLO_TEXTURE_FALLBACK_ASPECT,
   CYCLO_TEXTURE_MODE_VALUES,
@@ -82,42 +65,14 @@ import {
   DRESS_BLOOM_RADIUS,
   DRESS_BLOOM_THRESHOLD,
   DRESS_MATERIAL_GRAIN_STRENGTH,
-  DRESS_THUMBNAIL_TARGET_HEIGHT,
-  DRESS_THUMBNAIL_TARGET_WIDTH,
   DRESS_TRANSITION_FX_DURATION,
   DRESS_TRANSITION_FX_ENABLED,
   DRESS_TRANSITION_FX_OVERLAY_OPACITY,
-  FOCUS_MAX_LIFT,
-  FULL_DRESS_CACHE_LIMIT,
-  FULL_DRESS_FADE_SPEED,
-  GHOST_EDGE_THRESHOLD_DEGREES,
-  GHOST_LOAD_DELAY_MS,
   INFINITE_BACKDROP_MODE_VALUES,
   INVISIBLE_CITIES_SUBJECT_SCALE,
   LOADING_OVERLAY_FADE_MS,
-  MEW_SCROLL_ROTATION_EASE,
-  MEW_SCROLL_TRIGGER_PROGRESS,
-  MEW_SCROLL_VIEWPORT_FACTOR,
-  MOBILE_GHOST_LIMIT,
-  PHOTO_PRINT_BURST_INTERVAL,
-  PHOTO_PRINT_CARD_HEIGHT,
-  PHOTO_PRINT_CARD_WIDTH,
-  PHOTO_PRINT_DISCARD_Y,
-  PHOTO_PRINT_DRESS_CLEARANCE_NDC,
   PHOTO_PRINT_FLOOR_Y,
-  PHOTO_PRINT_GRAVITY,
-  PHOTO_PRINT_IMAGE_HEIGHT,
-  PHOTO_PRINT_IMAGE_URLS,
-  PHOTO_PRINT_IMAGE_WIDTH,
-  PHOTO_PRINT_LAYER_GAP,
-  PHOTO_PRINT_MIN_POINTER_DISTANCE,
-  PHOTO_PRINT_SPAWN_Z,
   PHOTO_PRINT_SURFACE_TILT,
-  SUBJECT_YAW_EASE,
-  SUBJECT_YAW_RANGE,
-  SUBJECT_YAW_RESPONSE,
-  SUBJECT_YAW_WIND_DRIFT,
-  TABLA_RASA_ACCENT_COLORS,
   TARGET_RENDER_INTERVAL_MS,
   TECHNICOLOR_YELLOW,
   WIND_ARCHIVE_SUBJECT_SCALE,
@@ -140,10 +95,6 @@ import {
 import { createMewTitleOverlay } from './rendering/mewTitleOverlay';
 import {
   ResourceTracker,
-  collectMaterialTextures,
-  disposeDressThumbnailRecord,
-  disposeGhostDressRecord,
-  disposeObjectResources,
   setObjectOpacity,
 } from './rendering/resourceTracker';
 import { createInfiniteBackdropMaterial } from './rendering/materials/infiniteBackdropMaterial';
@@ -158,6 +109,12 @@ import {
 import { patchCycloramaBackgroundMaterial } from './rendering/materials/cycloramaMaterial';
 import { renderIvoryPortal } from './ui/ivoryPortal';
 import { SignalDiptych } from './ui/signalDiptych';
+import { HoloSculptureSystem } from './rendering/sculptures/HoloSculptureSystem';
+import { PhotoPrintSystem } from './rendering/particles/PhotoPrintSystem';
+import { DressThumbnailRenderer } from './rendering/dresses/DressThumbnailRenderer';
+import { GhostDressSystem } from './rendering/dresses/GhostDressSystem';
+import { FullDressStore } from './rendering/dresses/FullDressStore';
+import { createSubjectInteractions } from './interactions/createSubjectInteractions';
 
 /**
  * ============================================================================
@@ -435,16 +392,11 @@ let infiniteBackdropMaterial: THREE.ShaderMaterial | null = null;
 let holoAccentGroup: THREE.Group | null = null;
 let ivorySculptureGroup: THREE.Group | null = null;
 let signalBlackGroup: THREE.Group | null = null;
+let holoSculptureSystem: HoloSculptureSystem | null = null;
 let photoPrintGroup: THREE.Group | null = null;
-let photoPrintCardGeometry: THREE.PlaneGeometry | null = null;
-let photoPrintImageGeometry: THREE.PlaneGeometry | null = null;
-let photoPrintShadowGeometry: THREE.PlaneGeometry | null = null;
+let photoPrintSystem: PhotoPrintSystem | null = null;
 let windArchiveDressShadow: THREE.Mesh | null = null;
 let dialecticHalftoneShadow: THREE.Mesh | null = null;
-const holoSculptureMotions: HoloSculptureMotion[] = [];
-const photoPrintParticles: PhotoPrintParticle[] = [];
-const photoPrintTextures: THREE.Texture[] = [];
-let photoPrintLayerCounter = 0;
 let contactShadow: THREE.Mesh | null = null;
 let contactShadowMaterial: THREE.ShaderMaterial | null = null;
 let paperRollMaterial: THREE.MeshStandardMaterial | null = null;
@@ -876,17 +828,15 @@ let dressBloomStrength =
 stageElement.dataset.dressBloomStrength = dressBloomStrength.toFixed(4);
 let windController: DressWindController | null = null;
 let armBloomController: ArmBloomController | null = null;
+let ghostDressSystem: GhostDressSystem | null = null;
 let disposed = false;
-let fullDressUseCounter = 0;
-let activeFullDress: FullDressRecord | null = null;
+const fullDressStore = new FullDressStore(scene, () => disposed);
 let dressLoadToken = 0;
-let ghostLoadToken = 0;
-let ghostLoadTimeout = 0;
-let lastGhostRequestKey = '';
-const fullDressCache = new Map<DressAssetId, FullDressRecord>();
-const fullDressPreloadPromises = new Map<DressAssetId, Promise<FullDressRecord | null>>();
-const ghostDressCache = new Map<DressAssetId, GhostDressRecord>();
-const dressThumbnailRecords = new Map<DressAssetId, DressThumbnailRecord>();
+const dressThumbnailRenderer = new DressThumbnailRenderer(
+  dressThumbnailCanvases,
+  getRenderPixelRatio,
+);
+const dressThumbnailRecords = dressThumbnailRenderer.records;
 const signalDiptych = new SignalDiptych({
   element: signalDiptychElement,
   thumbnails: dressThumbnailRecords,
@@ -894,50 +844,12 @@ const signalDiptych = new SignalDiptych({
   getDressId: () => dressAssetSettings.asset,
   getPixelRatio: getRenderPixelRatio,
 });
-const ghostPickTargets: THREE.Object3D[] = [];
-const ghostRaycaster = new THREE.Raycaster();
-const ghostPointer = new THREE.Vector2();
-const activeDressRaycaster = new THREE.Raycaster();
-const activeDressPointer = new THREE.Vector2();
 const timer = new THREE.Timer();
 timer.connect(document);
-const zeroWind = new THREE.Vector3();
-const pointerSample = new THREE.Vector2();
-const holoWorldPosition = new THREE.Vector3();
-const holoScreenPosition = new THREE.Vector2();
-const holoCursorDelta = new THREE.Vector2();
-const holoAwayFromCursor = new THREE.Vector2();
-const holoWindForce = new THREE.Vector3();
-const holoTargetOffset = new THREE.Vector3();
-const holoOffsetDelta = new THREE.Vector3();
-const holoTargetAngularOffset = new THREE.Vector3();
-const holoAngularDelta = new THREE.Vector3();
-const photoPrintSpawnRaycaster = new THREE.Raycaster();
 // Raycasting converts a 2D pointer coordinate into a 3D ray from the camera.
 // Intersecting that ray with a plane produces a world-space spawn position.
-const photoPrintSpawnNdc = new THREE.Vector2();
-const photoPrintSpawnPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -PHOTO_PRINT_SPAWN_Z);
-const photoPrintSpawnPosition = new THREE.Vector3();
-const photoPrintDressRaycaster = new THREE.Raycaster();
-const photoPrintDressPointer = new THREE.Vector2();
-const photoPrintDressWorldBounds = new THREE.Box3();
 // Box3 is an axis-aligned bounding box (AABB). It is fast and conservative:
 // rotated geometry may occupy less area than its AABB, but never more.
-const photoPrintProjectionPoint = new THREE.Vector3();
-const photoPrintDressScreenBounds: ScreenSpaceBounds = {
-  minX: 0,
-  maxX: 0,
-  minY: 0,
-  maxY: 0,
-};
-const photoPrintCardScreenBounds: ScreenSpaceBounds = {
-  minX: 0,
-  maxX: 0,
-  minY: 0,
-  maxY: 0,
-};
-const lastPhotoPrintBurstPoint = new THREE.Vector2(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
-let lastPhotoPrintBurstTime = Number.NEGATIVE_INFINITY;
 const pointerWind: PointerWindState = {
   previous: new THREE.Vector2(0.5, 0.5),
   gustCenter: new THREE.Vector2(0.5, 0.42),
@@ -968,13 +880,60 @@ const subjectMotion: SubjectMotionState = {
   baseCameraPosition: camera.position.clone(),
   baseFocusTarget: focusTarget.clone(),
 };
+
+const {
+  updatePointerWind,
+  updateSubjectMotion,
+  resetDressWind,
+  resetMewHoloScrollRotation,
+  handleMewHoloWheel,
+  handleMewHoloTouchStart,
+  handleMewHoloTouchMove,
+  handleMewHoloTouchEnd,
+  handlePointerMove,
+  handlePointerLeave,
+  applySafeCameraMotion,
+} = createSubjectInteractions({
+  canvasElement,
+  camera,
+  controls,
+  focusTarget,
+  settings,
+  pointerWind,
+  blueDressHover,
+  mewHoloScroll,
+  subjectMotion,
+  getThemeId: () => cycloramaBackgroundSettings.preset,
+  getDressId: () => dressAssetSettings.asset,
+  getActiveDress: () => fullDressStore.active,
+  loadDressAsset: async (assetId) => loadDressAsset(assetId),
+  findGhostAssetAtNormalized: (x, y) => ghostDressSystem?.findAssetAtNormalized(x, y) ?? null,
+  spawnPhotoPrint: (x, y, movementX, movementY, now) => {
+    photoPrintSystem?.maybeSpawn(x, y, movementX, movementY, now);
+  },
+});
+
 let queuedResizeFrame = 0;
 let queuedMewTitleOverlayFrame = 0;
 let mewTitleOverlayDirty = true;
 let editorialRailRevealTimeout = 0;
 let dialecticPaperTextureEnabled = false;
 
-initializeDressThumbnails();
+ghostDressSystem = new GhostDressSystem({
+  group: dressGhostGroup,
+  canvas: canvasElement,
+  camera,
+  getActiveDress: () => fullDressStore.active,
+  getActiveDressId: () => dressAssetSettings.asset,
+  getThemeId: () => cycloramaBackgroundSettings.preset,
+  isMobileViewport,
+  isDisposed: () => disposed,
+  loadActiveDress: async (assetId) => loadDressAsset(assetId),
+  syncThumbnail: (record) => dressThumbnailRenderer.syncFromGhost(record),
+  renderThumbnails: renderDressThumbnails,
+  onChange: () => updateDebugState(),
+});
+dressThumbnailRenderer.initialize();
 applyCycloramaBackgroundPreset(cycloramaBackgroundSettings.preset);
 registerAssetServiceWorker();
 void start();
@@ -993,7 +952,7 @@ async function start() {
   await loadDressAsset(dressAssetSettings.asset, !silentMewReload);
 
   hideLoadingOverlay();
-  scheduleGhostDressLoads();
+  ghostDressSystem?.schedule();
   animate();
   // The active dress and any theme-specific ghost are enough for the first
   // mobile frame. Preloading another full textured GLB duplicates its GPU
@@ -1022,7 +981,7 @@ async function preloadRemainingFullDresses() {
     }
 
     try {
-      await preloadFullDressAsset(assetId);
+      await fullDressStore.preload(DRESS_ASSETS[assetId]);
     } catch (error) {
       // Background preloading should never block the visible selected dress.
       console.warn(`Failed to preload ${DRESS_ASSETS[assetId].label}`, error);
@@ -1030,47 +989,11 @@ async function preloadRemainingFullDresses() {
   }
 }
 
-async function preloadFullDressAsset(assetId: DressAssetId) {
-  // The promise map prevents two callers from fetching/parsing the same GLB at
-  // once. The completed cache prevents work after the promise resolves.
-  if (fullDressCache.has(assetId) || fullDressPreloadPromises.has(assetId) || disposed) {
-    return;
-  }
 
-  const asset = DRESS_ASSETS[assetId];
-  const preloadPromise = loadFullDressRecord(asset).finally(() => {
-    fullDressPreloadPromises.delete(assetId);
-  });
-  fullDressPreloadPromises.set(assetId, preloadPromise);
 
-  const record = await preloadPromise;
 
-  if (disposed) {
-    return;
-  }
 
-  if (record && !fullDressCache.has(assetId)) {
-    fullDressCache.set(assetId, record);
-  }
-}
 
-async function loadFullDressRecord(
-  asset: DressAsset,
-  onStage?: (stage: string) => void,
-): Promise<FullDressRecord | null> {
-  const loaded = await loadDress(getDressAssetUrl(asset), onStage);
-
-  if (disposed) {
-    disposeObjectResources(loaded.root);
-    return null;
-  }
-
-  return createFullDressRecord(asset, loaded);
-}
-
-function getDressAssetUrl(asset: DressAsset) {
-  return usesMobileRenderProfile() ? asset.mobileUrl : asset.url;
-}
 
 function setLoadingOverlay(detail: string) {
   if (editorialRailRevealTimeout) {
@@ -1091,12 +1014,12 @@ function hideLoadingOverlay() {
 }
 
 async function loadDressAsset(assetId: DressAssetId, useLoadingOverlay = false) {
-  if (activeFullDress?.asset.id === assetId) {
+  if (fullDressStore.active?.asset.id === assetId) {
     if (dressAssetSettings.asset !== assetId) {
       dressLoadToken += 1;
       dressAssetSettings.asset = assetId;
       updateDressAssetButtons(false);
-      updateGhostVisibility();
+      ghostDressSystem?.updateVisibility();
     }
     return;
   }
@@ -1108,7 +1031,7 @@ async function loadDressAsset(assetId: DressAssetId, useLoadingOverlay = false) 
   const asset = DRESS_ASSETS[assetId];
   dressAssetSettings.asset = assetId;
   updateDressAssetButtons(true);
-  updateGhostVisibility();
+  ghostDressSystem?.updateVisibility();
   statusElement.dataset.hidden = 'false';
   delete statusElement.dataset.error;
   statusElement.textContent = `Loading ${asset.label}`;
@@ -1117,10 +1040,10 @@ async function loadDressAsset(assetId: DressAssetId, useLoadingOverlay = false) 
   }
 
   try {
-    let record: FullDressRecord | null | undefined = fullDressCache.get(assetId);
+    let record: FullDressRecord | null | undefined = fullDressStore.get(assetId);
 
     if (!record) {
-      const preloadPromise = fullDressPreloadPromises.get(assetId);
+      const preloadPromise = fullDressStore.getPending(assetId);
       if (preloadPromise) {
         if (useLoadingOverlay) {
           setLoadingOverlay(`Finishing ${asset.label}`);
@@ -1128,7 +1051,7 @@ async function loadDressAsset(assetId: DressAssetId, useLoadingOverlay = false) 
         statusElement.textContent = `Finishing ${asset.label}`;
         record = await preloadPromise;
       } else {
-        record = await loadFullDressRecord(asset, (stage) => {
+        record = await fullDressStore.load(asset, (stage) => {
           if (token === dressLoadToken) {
             statusElement.textContent = `${stage}: ${asset.label}`;
             if (useLoadingOverlay) {
@@ -1146,7 +1069,7 @@ async function loadDressAsset(assetId: DressAssetId, useLoadingOverlay = false) 
         throw new Error(`Could not prepare ${asset.label}.`);
       }
 
-      fullDressCache.set(assetId, record);
+      fullDressStore.cache(record);
     }
 
     if (token !== dressLoadToken) {
@@ -1154,14 +1077,14 @@ async function loadDressAsset(assetId: DressAssetId, useLoadingOverlay = false) 
     }
 
     activateFullDress(record);
-    pruneFullDressCache();
+    fullDressStore.prune();
     updateDressUrl(assetId);
 
     if (isMewHoloScrollTheme() && !mewHoloScroll.switching) {
       resetMewHoloScrollRotation();
     }
 
-    scheduleGhostDressLoads();
+    ghostDressSystem?.schedule();
     statusElement.dataset.hidden = 'true';
     statusElement.textContent = '';
   } catch (error) {
@@ -1169,10 +1092,10 @@ async function loadDressAsset(assetId: DressAssetId, useLoadingOverlay = false) 
       return;
     }
 
-    dressAssetSettings.asset = activeFullDress?.asset.id ?? DRESS_ASSET_DEFAULT;
+    dressAssetSettings.asset = fullDressStore.active?.asset.id ?? DRESS_ASSET_DEFAULT;
     updateDressAssetButtons(false);
-    updateGhostVisibility();
-    statusElement.textContent = error instanceof Error ? error.message : `Failed to load ${getDressAssetUrl(asset)}`;
+    ghostDressSystem?.updateVisibility();
+    statusElement.textContent = error instanceof Error ? error.message : `Failed to load ${fullDressStore.getAssetUrl(asset)}`;
     statusElement.dataset.error = 'true';
   } finally {
     if (token === dressLoadToken) {
@@ -1181,29 +1104,10 @@ async function loadDressAsset(assetId: DressAssetId, useLoadingOverlay = false) 
   }
 }
 
-function createFullDressRecord(asset: DressAsset, loaded: LoadedDress): FullDressRecord {
-  removeModelShadowArtifacts(loaded.root);
 
-  const subjectPivot = new THREE.Group();
-  // The GLB may contain many nested nodes, bones, and meshes. Wrapping its root
-  // in one Group gives the application a stable place for theme transforms,
-  // crossfade visibility, and attached contact shadows.
-  subjectPivot.name = `subject ${asset.id}`;
-  subjectPivot.visible = false;
-  subjectPivot.add(loaded.root);
-
-  return {
-    asset,
-    loaded,
-    pivot: subjectPivot,
-    opacity: 1,
-    targetOpacity: 1,
-    lastUsed: ++fullDressUseCounter,
-  };
-}
 
 function activateFullDress(record: FullDressRecord) {
-  const previous = activeFullDress;
+  const previous = fullDressStore.active;
 
   if (previous === record) {
     return;
@@ -1223,11 +1127,10 @@ function activateFullDress(record: FullDressRecord) {
     if (dialecticHalftoneShadow?.parent === previous.pivot) {
       previous.pivot.remove(dialecticHalftoneShadow);
     }
-    fadeOutFullDress(previous);
+    fullDressStore.fadeOut(previous);
   }
 
-  activeFullDress = record;
-  record.lastUsed = ++fullDressUseCounter;
+  fullDressStore.activate(record);
   record.pivot.rotation.y = subjectMotion.yaw;
   record.pivot.visible = true;
 
@@ -1255,7 +1158,7 @@ function activateFullDress(record: FullDressRecord) {
   setObjectOpacity(record.pivot, 0);
   applyResponsiveCameraToCanvas();
   updateDebugState(record.loaded.bounds);
-  updateGhostVisibility();
+  ghostDressSystem?.updateVisibility();
   updateThemeObjectVisibility();
 
   if (previous) {
@@ -1282,7 +1185,7 @@ function maybeStartDressTransitionFx() {
 function renderDressTransitionFx(delta: number): boolean {
   const pipeline = ensureSubjectTransitionPipeline();
   const subjectPivots: THREE.Object3D[] = [];
-  fullDressCache.forEach((record) => {
+  fullDressStore.records.forEach((record) => {
     if (record.pivot.visible) {
       subjectPivots.push(record.pivot);
     }
@@ -1347,65 +1250,11 @@ function renderDressTransitionFx(delta: number): boolean {
   return true;
 }
 
-function fadeOutFullDress(record: FullDressRecord) {
-  if (record.pivot.parent !== scene) {
-    scene.add(record.pivot);
-  }
 
-  record.pivot.visible = true;
-  record.opacity = Math.max(record.opacity, 0.001);
-  record.targetOpacity = 0;
-}
 
-function updateFullDressFades(delta: number) {
-  fullDressCache.forEach((record) => {
-    if (record.pivot.parent !== scene || !record.pivot.visible || Math.abs(record.opacity - record.targetOpacity) < 0.001) {
-      return;
-    }
 
-    // Exponential smoothing is preferable to a fixed per-frame lerp amount:
-    // t = 1 - e^(-rate*dt) represents the same response in real time at
-    // different frame rates.
-    const nextOpacity = THREE.MathUtils.lerp(
-      record.opacity,
-      record.targetOpacity,
-      1 - Math.exp(-delta * FULL_DRESS_FADE_SPEED),
-    );
-    record.opacity = Math.abs(nextOpacity - record.targetOpacity) < 0.015 ? record.targetOpacity : nextOpacity;
-    setObjectOpacity(record.pivot, record.opacity);
 
-    if (record.opacity <= 0 && record !== activeFullDress) {
-      scene.remove(record.pivot);
-      record.pivot.visible = false;
-      record.opacity = 1;
-      record.targetOpacity = 1;
-      setObjectOpacity(record.pivot, 1);
-    }
-  });
-}
 
-function pruneFullDressCache() {
-  // GLB meshes, textures, and shader programs occupy GPU memory even when not
-  // visible. This is a small least-recently-used cache: active stays, the most
-  // recently used inactive records stay up to the limit, older records dispose.
-  const inactiveRecords = Array.from(fullDressCache.values())
-    .filter((record) => record !== activeFullDress)
-    .sort((a, b) => b.lastUsed - a.lastUsed);
-
-  const cacheLimit = usesMobileRenderProfile() ? 1 : FULL_DRESS_CACHE_LIMIT;
-
-  inactiveRecords.slice(Math.max(0, cacheLimit - 1)).forEach((record) => {
-    if (record === activeFullDress) {
-      return;
-    }
-
-    fullDressCache.delete(record.asset.id);
-    if (record.pivot.parent) {
-      record.pivot.parent.remove(record.pivot);
-    }
-    disposeObjectResources(record.pivot);
-  });
-}
 
 function animate(timestamp?: number) {
   // -------------------------------------------------------------------------
@@ -1440,11 +1289,11 @@ function animate(timestamp?: number) {
   infiniteBackdropUniforms.uBackdropTime.value = shaderTime;
 
   // First update CPU-side state and shader uniforms...
-  updateFullDressFades(delta);
+  fullDressStore.updateFades(delta);
   updatePointerWind(delta);
   updateSubjectMotion(delta);
-  updatePhotoPrintParticles(delta);
-  updateMewHoloSculptures(shaderTime, delta);
+  photoPrintSystem?.update(delta, shaderTime);
+  holoSculptureSystem?.update(shaderTime, delta);
   updateThemeObjectVisibility();
   // ...then upload the latest wind state to the dress material uniforms.
   windController?.update({
@@ -1585,23 +1434,11 @@ function animate(timestamp?: number) {
   animationFrame = window.requestAnimationFrame(animate);
 }
 
-function getVisibleFullDressObjects() {
-  const objects: THREE.Object3D[] = [];
 
-  fullDressCache.forEach((record) => {
-    if (record.pivot.visible) {
-      // Hide the imported dress model, not the whole pivot.
-      // This keeps pivot-attached floor shadows visible in the base/environment pass.
-      objects.push(record.loaded.root);
-    }
-  });
-
-  return objects;
-}
 
 function getVisibleSubjectObjects() {
   const objects: THREE.Object3D[] = [];
-  objects.push(...getVisibleFullDressObjects());
+  objects.push(...fullDressStore.visibleRoots());
 
   if (dressGhostGroup.visible) {
     objects.push(dressGhostGroup);
@@ -1817,549 +1654,57 @@ function renderSubjectBloom(delta: number, pipeline: SubjectBloomPipeline) {
   pipeline.renderer.autoClear = previousAutoClear;
 }
 
-function updatePointerWind(delta: number) {
-  const now = performance.now() * 0.001;
-  const idleTime = pointerWind.hasPointer ? now - pointerWind.lastMoveTime : Number.POSITIVE_INFINITY;
-
-  if (idleTime > 0.045) {
-    // `lerp(target, t)` mutates the vector toward the target. Exponential t
-    // produces a smooth physical-feeling decay rather than an abrupt stop.
-    const targetFade = 1 - Math.exp(-delta * settings.fadeSpeed * 1.2);
-    pointerWind.targetWind.lerp(zeroWind, targetFade);
-  }
-
-  const follow = 1 - Math.exp(-delta * settings.followSpeed);
-  pointerWind.wind.lerp(pointerWind.targetWind, follow);
-
-  if (idleTime > 0.08) {
-    pointerWind.activity *= Math.exp(-delta * settings.fadeSpeed);
-  }
-
-  if (pointerWind.activity < 0.002) {
-    pointerWind.activity = 0;
-  }
-
-  if (pointerWind.targetWind.lengthSq() < 0.000001) {
-    pointerWind.targetWind.set(0, 0, 0);
-  }
-}
-
-function updateSubjectMotion(delta: number) {
-  // Signal Black reuses Blue's "hold yaw at 0" behavior so the dress doesn't
-  // swing toward the cursor when the user clicks nodes in the left pane.
-  if (isBlueStackTheme() || isSignalBlackTheme()) {
-    updateBlueSubjectMotion(delta);
-    return;
-  }
-
-  if (isMewHoloScrollTheme()) {
-    updateMewHoloScrollSubjectMotion(delta);
-    return;
-  }
-
-  const activity = clamp01(pointerWind.activity);
-  const pointerYaw = (pointerWind.gustCenter.x - 0.5) * SUBJECT_YAW_RANGE * SUBJECT_YAW_RESPONSE;
-  const yawDrift = pointerWind.wind.x * activity * delta * SUBJECT_YAW_WIND_DRIFT;
-  subjectMotion.targetYaw = THREE.MathUtils.lerp(
-    subjectMotion.targetYaw,
-    pointerYaw,
-    1 - Math.exp(-delta * 3.4),
-  );
-  subjectMotion.targetYaw += yawDrift;
-  subjectMotion.yaw = THREE.MathUtils.lerp(
-    subjectMotion.yaw,
-    subjectMotion.targetYaw,
-    1 - Math.exp(-delta * SUBJECT_YAW_EASE),
-  );
-
-  if (subjectMotion.pivot) {
-    subjectMotion.pivot.rotation.y = subjectMotion.yaw;
-  }
-
-  const verticalActivity = 0.25 + activity * 0.75;
-  subjectMotion.targetCameraLift = THREE.MathUtils.clamp(
-    pointerWind.wind.y * verticalActivity * CAMERA_VERTICAL_RESPONSE,
-    -CAMERA_MAX_LIFT,
-    CAMERA_MAX_LIFT,
-  );
-  subjectMotion.cameraLift = THREE.MathUtils.lerp(
-    subjectMotion.cameraLift,
-    subjectMotion.targetCameraLift,
-    1 - Math.exp(-delta * CAMERA_VERTICAL_EASE),
-  );
-
-  applySafeCameraMotion();
-}
-
-function updateMewHoloScrollSubjectMotion(delta: number) {
-  mewHoloScroll.progress = THREE.MathUtils.lerp(
-    mewHoloScroll.progress,
-    mewHoloScroll.targetProgress,
-    1 - Math.exp(-delta * MEW_SCROLL_ROTATION_EASE),
-  );
-
-  if (Math.abs(mewHoloScroll.progress - mewHoloScroll.targetProgress) < 0.0015) {
-    mewHoloScroll.progress = mewHoloScroll.targetProgress;
-  }
-
-  subjectMotion.targetYaw = mewHoloScroll.progress * Math.PI;
-  subjectMotion.yaw = subjectMotion.targetYaw;
-
-  if (subjectMotion.pivot) {
-    subjectMotion.pivot.rotation.y = subjectMotion.yaw;
-  }
-
-  subjectMotion.targetCameraLift = 0;
-  subjectMotion.cameraLift = THREE.MathUtils.lerp(
-    subjectMotion.cameraLift,
-    0,
-    1 - Math.exp(-delta * CAMERA_VERTICAL_EASE),
-  );
-  applySafeCameraMotion();
-
-  if (
-    !mewHoloScroll.switching &&
-    mewHoloScroll.targetProgress >= 1 &&
-    mewHoloScroll.progress >= MEW_SCROLL_TRIGGER_PROGRESS
-  ) {
-    void advanceMewHoloScrollDress();
-  }
-}
-
-function updateBlueSubjectMotion(delta: number) {
-  const now = performance.now() * 0.001;
-  const movingOverDress = blueDressHover.overActiveDress && now - blueDressHover.lastMoveTime < BLUE_DRESS_HOVER_IDLE_SECONDS;
-
-  if (!movingOverDress) {
-    subjectMotion.targetYaw = THREE.MathUtils.lerp(
-      subjectMotion.targetYaw,
-      0,
-      1 - Math.exp(-delta * BLUE_DRESS_RETURN_EASE),
-    );
-  }
-
-  subjectMotion.yaw = THREE.MathUtils.lerp(
-    subjectMotion.yaw,
-    subjectMotion.targetYaw,
-    1 - Math.exp(-delta * BLUE_DRESS_ROTATION_EASE),
-  );
-
-  if (subjectMotion.pivot) {
-    subjectMotion.pivot.rotation.y = subjectMotion.yaw;
-  }
-
-  subjectMotion.targetCameraLift = 0;
-  subjectMotion.cameraLift = THREE.MathUtils.lerp(
-    subjectMotion.cameraLift,
-    0,
-    1 - Math.exp(-delta * CAMERA_VERTICAL_EASE),
-  );
-  applySafeCameraMotion();
-}
-
-function resetDressWind() {
-  pointerWind.targetWind.set(0, 0, 0);
-  pointerWind.wind.set(0, 0, 0);
-  pointerWind.activity = 0;
-  pointerWind.speed = 0;
-  pointerWind.hasPointer = false;
-  blueDressHover.overActiveDress = false;
-  blueDressHover.lastMoveTime = Number.NEGATIVE_INFINITY;
-  delete canvasElement.dataset.interactionCursor;
-  subjectMotion.targetYaw = 0;
-  subjectMotion.targetCameraLift = 0;
-}
-
-function resetMewHoloScrollRotation(applyToSubject = true) {
-  mewHoloScroll.progress = 0;
-  mewHoloScroll.targetProgress = 0;
-  mewHoloScroll.touchY = null;
-
-  if (!applyToSubject) {
-    return;
-  }
-
-  subjectMotion.targetYaw = 0;
-  subjectMotion.yaw = 0;
-  subjectMotion.targetCameraLift = 0;
-
-  if (subjectMotion.pivot) {
-    subjectMotion.pivot.rotation.y = 0;
-  }
-
-  applySafeCameraMotion();
-}
-
-function applyMewHoloScrollDelta(deltaPixels: number) {
-  if (!isMewHoloScrollTheme() || mewHoloScroll.switching || Math.abs(deltaPixels) < 0.5) {
-    return false;
-  }
-
-  const scrollDistance = Math.max(360, window.innerHeight * MEW_SCROLL_VIEWPORT_FACTOR);
-  mewHoloScroll.targetProgress = THREE.MathUtils.clamp(
-    mewHoloScroll.targetProgress + deltaPixels / scrollDistance,
-    0,
-    1,
-  );
-
-  return true;
-}
-
-function normalizeWheelDelta(event: WheelEvent) {
-  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
-    return event.deltaY * window.innerHeight;
-  }
-
-  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
-    return event.deltaY * 16;
-  }
-
-  return event.deltaY;
-}
-
-function shouldIgnoreMewHoloScrollEvent(event: Event) {
-  const target = event.target instanceof Element ? event.target : null;
-  return Boolean(target?.closest('.background-switcher, button, input, select, textarea'));
-}
-
-async function advanceMewHoloScrollDress() {
-  const activeId = activeFullDress?.asset.id ?? dressAssetSettings.asset;
-  const activeIndex = DRESS_ASSET_ORDER.indexOf(activeId);
-  const nextAssetId = DRESS_ASSET_ORDER[(Math.max(0, activeIndex) + 1) % DRESS_ASSET_ORDER.length];
-
-  if (!nextAssetId || nextAssetId === activeId) {
-    resetMewHoloScrollRotation();
-    return;
-  }
-
-  mewHoloScroll.switching = true;
-
-  try {
-    await loadDressAsset(nextAssetId);
-  } catch (error) {
-    console.warn('Failed to advance Mew Holo dress from scroll', error);
-  } finally {
-    mewHoloScroll.switching = false;
-
-    if (isMewHoloScrollTheme()) {
-      resetMewHoloScrollRotation();
-    } else {
-      resetMewHoloScrollRotation(false);
-    }
-  }
-}
-
-function handleMewHoloWheel(event: WheelEvent) {
-  if (shouldIgnoreMewHoloScrollEvent(event)) {
-    return;
-  }
-
-  if (applyMewHoloScrollDelta(normalizeWheelDelta(event))) {
-    event.preventDefault();
-  }
-}
-
-function handleMewHoloTouchStart(event: TouchEvent) {
-  if (!isMewHoloScrollTheme() || shouldIgnoreMewHoloScrollEvent(event) || event.touches.length === 0) {
-    mewHoloScroll.touchY = null;
-    return;
-  }
-
-  mewHoloScroll.touchY = event.touches[0].clientY;
-}
-
-function handleMewHoloTouchMove(event: TouchEvent) {
-  if (!isMewHoloScrollTheme() || shouldIgnoreMewHoloScrollEvent(event) || event.touches.length === 0 || mewHoloScroll.touchY === null) {
-    return;
-  }
-
-  const nextTouchY = event.touches[0].clientY;
-  const deltaPixels = mewHoloScroll.touchY - nextTouchY;
-  mewHoloScroll.touchY = nextTouchY;
-
-  if (applyMewHoloScrollDelta(deltaPixels)) {
-    event.preventDefault();
-  }
-}
-
-function handleMewHoloTouchEnd() {
-  mewHoloScroll.touchY = null;
-}
-
-function clamp01(value: number) {
-  return Math.min(1, Math.max(0, value));
-}
-
-function clampSigned(value: number, limit: number) {
-  return Math.min(limit, Math.max(-limit, value));
-}
-
-function handlePointerMove(event: PointerEvent) {
-  const bounds = canvasElement.getBoundingClientRect();
-  const x = clamp01((event.clientX - bounds.left) / bounds.width);
-  const y = clamp01(1 - (event.clientY - bounds.top) / bounds.height);
-  const now = performance.now() * 0.001;
-  updateCanvasInteractionCursor(x, y);
-
-  if (!pointerWind.hasPointer) {
-    pointerWind.previous.set(x, y);
-    pointerWind.gustCenter.set(x, y);
-    pointerWind.lastSampleTime = now;
-    pointerWind.lastMoveTime = now;
-    pointerWind.hasPointer = true;
-    updateBlueDressHoverFromPointer(x, y, 0, now);
-    maybeSpawnPhotoPrintBurst(x, y, x < 0.5 ? 0.72 : -0.72, 0.12, now);
-    return;
-  }
-
-  const rawMovementX = x - pointerWind.previous.x;
-  const sampleDelta = Math.max(1 / 120, now - pointerWind.lastSampleTime);
-  const movementX = (x - pointerWind.previous.x) / sampleDelta;
-  const movementY = (y - pointerWind.previous.y) / sampleDelta;
-  pointerWind.speed = Math.hypot(movementX, movementY);
-  pointerWind.previous.set(x, y);
-  pointerWind.gustCenter.lerp(pointerSample.set(x, y), 0.72);
-  pointerWind.lastMoveTime = now;
-  pointerWind.lastSampleTime = now;
-
-  const windX = clampSigned(movementX * 0.12, 1.35);
-  const windY = clampSigned(movementY * 0.11, 0.62);
-  const windZ = clampSigned(Math.abs(movementX) * 0.018 + Math.abs(movementY) * 0.01, 0.34);
-  pointerWind.targetWind.set(windX, windY, windZ);
-  pointerWind.activity = Math.max(pointerWind.activity, clamp01(0.18 + pointerWind.speed * 0.1));
-  maybeSpawnPhotoPrintBurst(x, y, movementX, movementY, now);
-  updateBlueDressHoverFromPointer(x, y, rawMovementX, now);
-}
-
-function handlePointerLeave() {
-  pointerWind.lastMoveTime = performance.now() * 0.001 - 0.12;
-  pointerWind.targetWind.set(0, 0, 0);
-  blueDressHover.overActiveDress = false;
-  delete canvasElement.dataset.interactionCursor;
-}
-
-function updateCanvasInteractionCursor(x: number, y: number) {
-  if (ghostPickTargets.length > 0) {
-    ghostPointer.set(x * 2 - 1, y * 2 - 1);
-    ghostRaycaster.setFromCamera(ghostPointer, camera);
-    dressGhostGroup.updateMatrixWorld(true);
-
-    const ghostHit = ghostRaycaster
-      .intersectObjects(ghostPickTargets, false)
-      .find((intersection) => isObjectWorldVisible(intersection.object));
-    const ghostAssetId = ghostHit ? findDressAssetFromObject(ghostHit.object) : null;
-
-    if (ghostAssetId && ghostAssetId !== dressAssetSettings.asset) {
-      canvasElement.dataset.interactionCursor = 'ghost';
-      return;
-    }
-  }
-
-  if (activeFullDress) {
-    activeDressPointer.set(x * 2 - 1, y * 2 - 1);
-    activeDressRaycaster.setFromCamera(activeDressPointer, camera);
-    activeFullDress.loaded.dress.updateMatrixWorld(true);
-
-    const overActiveDress = activeDressRaycaster
-      .intersectObject(activeFullDress.loaded.dress, true)
-      .some((intersection) => (intersection.object as THREE.Mesh).isMesh);
-
-    if (overActiveDress) {
-      canvasElement.dataset.interactionCursor = 'dress';
-      return;
-    }
-  }
-
-  delete canvasElement.dataset.interactionCursor;
-}
-
-function updateBlueDressHoverFromPointer(x: number, y: number, movementX: number, now: number) {
-  // Signal Black piggybacks on Blue's hover-to-rotate behavior so hovering the
-  // dress in the right pane spins it, but moving the cursor anywhere else
-  // (including the graph nodes in the left pane) leaves it facing forward.
-  if ((!isBlueStackTheme() && !isSignalBlackTheme()) || !activeFullDress) {
-    blueDressHover.overActiveDress = false;
-    return;
-  }
-
-  activeDressPointer.set(x * 2 - 1, y * 2 - 1);
-  activeDressRaycaster.setFromCamera(activeDressPointer, camera);
-  activeFullDress.loaded.dress.updateMatrixWorld(true);
-  const intersections = activeDressRaycaster.intersectObject(activeFullDress.loaded.dress, true);
-  const overDress = intersections.some((intersection) => {
-    const mesh = intersection.object as THREE.Mesh;
-    return mesh.isMesh;
-  });
-
-  blueDressHover.overActiveDress = overDress;
-
-  if (!overDress || Math.abs(movementX) < 0.0005) {
-    return;
-  }
-
-  blueDressHover.lastMoveTime = now;
-  subjectMotion.targetYaw = THREE.MathUtils.clamp(
-    subjectMotion.targetYaw + movementX * BLUE_DRESS_HOVER_TURN_RESPONSE,
-    -BLUE_DRESS_HOVER_YAW_LIMIT,
-    BLUE_DRESS_HOVER_YAW_LIMIT,
-  );
-}
-
-function removeModelShadowArtifacts(root: THREE.Object3D) {
-  root.traverse((object) => {
-    const mesh = object as THREE.Mesh;
-
-    if (!mesh.isMesh) {
-      return;
-    }
-
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
-  });
-}
-
-function initializeDressThumbnails() {
-  // These thumbnails are not visible in the mobile controls. Avoiding their
-  // independent WebGL contexts leaves the full render budget for the dress,
-  // title field, and every visible post effect.
-
-
-  dressThumbnailCanvases.forEach((thumbnailCanvas) => {
-    const assetId = thumbnailCanvas.dataset.dressThumbnail;
-
-    if (!isDressAssetId(assetId)) {
-      return;
-    }
-
-    const thumbnailRenderer = new THREE.WebGLRenderer({
-      canvas: thumbnailCanvas,
-      alpha: true,
-      antialias: true,
-      powerPreference: 'high-performance',
-    });
-    thumbnailRenderer.setClearColor(0x000000, 0);
-    thumbnailRenderer.setPixelRatio(getRenderPixelRatio());
-    thumbnailRenderer.outputColorSpace = THREE.SRGBColorSpace;
-    thumbnailRenderer.toneMapping = THREE.NoToneMapping;
-
-    const thumbnailScene = new THREE.Scene();
-    thumbnailScene.add(new THREE.AmbientLight(0xffffff, 1.45));
-    const thumbnailKey = new THREE.DirectionalLight(0xffffff, 2.9);
-    thumbnailKey.position.set(-1.6, 2.4, 2.2);
-    thumbnailScene.add(thumbnailKey);
-    const thumbnailRim = new THREE.DirectionalLight(0x9fd8ff, 1.35);
-    thumbnailRim.position.set(1.8, 1.4, -1.8);
-    thumbnailScene.add(thumbnailRim);
-
-    const thumbnailCamera = new THREE.PerspectiveCamera(30, 1, 0.1, 12);
-    thumbnailCamera.position.set(0, 0.04, 4.15);
-    thumbnailCamera.lookAt(0, 0.02, 0);
-
-    dressThumbnailRecords.set(assetId, {
-      assetId,
-      canvas: thumbnailCanvas,
-      renderer: thumbnailRenderer,
-      scene: thumbnailScene,
-      camera: thumbnailCamera,
-      root: null,
-    });
-  });
-}
-
-function syncDressThumbnailFromGhost(record: GhostDressRecord) {
-  const thumbnail = dressThumbnailRecords.get(record.asset.id);
-
-  if (!thumbnail || thumbnail.root) {
-    renderDressThumbnail(record.asset.id);
-    return;
-  }
-
-  const clone = createGhostThumbnailClone(record.root);
-  thumbnail.root = clone;
-  thumbnail.scene.add(clone);
-  frameGhostThumbnailRoot(clone);
-  renderDressThumbnail(record.asset.id);
-}
-
-function createGhostThumbnailClone(root: THREE.Group) {
-  const clone = root.clone(true);
-
-  clone.traverse((object) => {
-    const mesh = object as THREE.Mesh;
-    const line = object as THREE.LineSegments;
-
-    if (mesh.isMesh && object.userData.isGhostWire) {
-      object.visible = false;
-      return;
-    }
-
-    if (mesh.isMesh && mesh.material) {
-      mesh.material = new THREE.MeshStandardMaterial({
-        color: 0x6f7d76,
-        roughness: 0.82,
-        metalness: 0,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.4,
-        depthTest: true,
-        depthWrite: true,
-        toneMapped: false,
-      });
-      mesh.renderOrder = 1;
-      return;
-    }
-
-    if ((line.isLineSegments || line.isLine) && line.material) {
-      line.material = new THREE.LineBasicMaterial({
-        color: 0x1f2a26,
-        transparent: true,
-        opacity: 0.9,
-        depthTest: true,
-        depthWrite: false,
-        toneMapped: false,
-      });
-      line.renderOrder = 3;
-    }
-  });
-
-  return clone;
-}
-
-function frameGhostThumbnailRoot(root: THREE.Group) {
-  root.position.set(0, 0, 0);
-  root.rotation.set(-0.04, 0.54, 0);
-  root.scale.setScalar(1);
-  root.updateMatrixWorld(true);
-
-  const bounds = new THREE.Box3().setFromObject(root);
-  const center = bounds.getCenter(new THREE.Vector3());
-  const size = bounds.getSize(new THREE.Vector3());
-  const scale = Math.min(
-    DRESS_THUMBNAIL_TARGET_HEIGHT / Math.max(size.y, 0.001),
-    DRESS_THUMBNAIL_TARGET_WIDTH / Math.max(size.x, 0.001),
-  );
-
-  root.scale.setScalar(scale);
-  root.position.copy(center).multiplyScalar(-scale);
-  root.position.y += size.y * scale * 0.035;
-  root.updateMatrixWorld(true);
-}
-
-function renderDressThumbnail(assetId: DressAssetId) {
-  const thumbnail = dressThumbnailRecords.get(assetId);
-
-  if (!thumbnail?.root) {
-    return;
-  }
-
-  const width = Math.max(1, thumbnail.canvas.clientWidth || 148);
-  const height = Math.max(1, thumbnail.canvas.clientHeight || 148);
-  thumbnail.renderer.setPixelRatio(getRenderPixelRatio());
-  thumbnail.renderer.setSize(width, height, false);
-  thumbnail.camera.aspect = width / height;
-  thumbnail.camera.updateProjectionMatrix();
-  thumbnail.renderer.render(thumbnail.scene, thumbnail.camera);
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 function renderDressThumbnails() {
   if (cycloramaBackgroundSettings.preset === 'signal-black') {
@@ -2374,368 +1719,36 @@ function renderDressThumbnails() {
     return;
   }
 
-  DRESS_ASSET_ORDER.forEach((assetId) => renderDressThumbnail(assetId));
+  dressThumbnailRenderer.renderAll(DRESS_ASSET_ORDER);
 }
 
-function scheduleGhostDressLoads() {
-  if (!activeFullDress) {
-    return;
-  }
 
-  const desiredGhostIds = getDesiredGhostAssetIds();
-  const requestKey = desiredGhostIds.join('|');
-  lastGhostRequestKey = requestKey;
-  ghostLoadToken += 1;
-  updateGhostVisibility(desiredGhostIds);
 
-  if (ghostLoadTimeout) {
-    window.clearTimeout(ghostLoadTimeout);
-    ghostLoadTimeout = 0;
-  }
 
-  const unloadedIds = desiredGhostIds.filter((assetId) => !ghostDressCache.has(assetId));
 
-  if (unloadedIds.length === 0) {
-    return;
-  }
 
-  void loadGhostDressQueue(unloadedIds, ghostLoadToken, requestKey);
-}
 
-async function loadGhostDressQueue(assetIds: DressAssetId[], token: number, requestKey: string) {
-  for (const assetId of assetIds) {
-    if (disposed || token !== ghostLoadToken || requestKey !== lastGhostRequestKey) {
-      return;
-    }
 
-    await waitForGhostLoadTurn();
 
-    if (disposed || token !== ghostLoadToken || requestKey !== lastGhostRequestKey || ghostDressCache.has(assetId)) {
-      continue;
-    }
 
-    try {
-      const record = await loadGhostDress(assetId);
 
-      if (disposed || token !== ghostLoadToken || requestKey !== lastGhostRequestKey) {
-        disposeGhostDressRecord(record);
-        continue;
-      }
 
-      ghostDressCache.set(assetId, record);
-      dressGhostGroup.add(record.root);
-      syncDressThumbnailFromGhost(record);
-      rebuildGhostPickTargets();
-      updateGhostVisibility();
-    } catch (error) {
-      // Ghost loading should never break the main selected dress experience.
-      console.warn(`Failed to load ghost dress ${assetId}`, error);
-    }
-  }
-}
 
-function waitForGhostLoadTurn() {
-  return new Promise<void>((resolve) => {
-    ghostLoadTimeout = window.setTimeout(() => {
-      ghostLoadTimeout = 0;
-      resolve();
-    }, GHOST_LOAD_DELAY_MS);
-  });
-}
 
-async function loadGhostDress(assetId: DressAssetId): Promise<GhostDressRecord> {
-  const asset = DRESS_ASSETS[assetId];
-  const loaded = await loadDress(getDressAssetUrl(asset));
-  const material = new THREE.LineBasicMaterial({
-    color: 0xf7efe5,
-    transparent: true,
-    opacity: 0.72,
-    depthTest: false,
-    depthWrite: false,
-    toneMapped: false,
-  });
-  const fillMaterial = new THREE.MeshBasicMaterial({
-    color: 0xf7efe5,
-    transparent: true,
-    opacity: 0.1,
-    side: THREE.DoubleSide,
-    depthTest: false,
-    depthWrite: false,
-    toneMapped: false,
-  });
-  const wireMaterial = new THREE.MeshBasicMaterial({
-    color: 0xf7efe5,
-    transparent: true,
-    opacity: 0.2,
-    wireframe: true,
-    depthTest: false,
-    depthWrite: false,
-    toneMapped: false,
-  });
-
-  replaceDressWithGhostEdges(loaded.dress, material, fillMaterial, wireMaterial);
-  replaceDressWithGhostEdges(loaded.arms, material, fillMaterial, wireMaterial);
-
-  const root = new THREE.Group();
-  root.name = `ghost ${asset.id}`;
-  root.position.set(...asset.ghost.position);
-  root.rotation.y = asset.ghost.rotationY;
-  root.scale.setScalar(asset.ghost.scale);
-  root.userData.dressAsset = asset.id;
-  root.add(loaded.root);
-
-  const pickTargets: THREE.Object3D[] = [];
-  loaded.root.traverse((object) => {
-    const mesh = object as THREE.Mesh;
-
-    if (!mesh.isMesh || object.userData.isGhostWire) {
-      return;
-    }
-
-    mesh.userData.dressAsset = asset.id;
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
-    pickTargets.push(mesh);
-  });
-
-  return {
-    asset,
-    root,
-    material,
-    fillMaterial,
-    wireMaterial,
-    pickTargets,
-  };
-}
-
-function replaceDressWithGhostEdges(
-  dress: THREE.Object3D,
-  lineMaterial: THREE.LineBasicMaterial,
-  fillMaterial: THREE.MeshBasicMaterial,
-  wireMaterial: THREE.MeshBasicMaterial,
-) {
-  const originalMaterials = new Set<THREE.Material>();
-  const originalTextures = new Set<THREE.Texture>();
-  const meshes: THREE.Mesh[] = [];
-
-  dress.traverse((object) => {
-    const mesh = object as THREE.Mesh;
-
-    if (!mesh.isMesh || !mesh.material) {
-      return;
-    }
-
-    meshes.push(mesh);
-  });
-
-  meshes.forEach((mesh) => {
-    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    materials.forEach((sourceMaterial) => {
-      originalMaterials.add(sourceMaterial);
-      collectMaterialTextures(sourceMaterial, originalTextures);
-    });
-    mesh.material = fillMaterial;
-    mesh.renderOrder = 5;
-    mesh.frustumCulled = false;
-
-    if (mesh.geometry) {
-      const wire = new THREE.Mesh(mesh.geometry, wireMaterial);
-      wire.name = `${mesh.name || 'dress'} full wire ghost`;
-      wire.userData.isGhostWire = true;
-      wire.renderOrder = 6;
-      wire.frustumCulled = false;
-      mesh.add(wire);
-
-      const edges = new THREE.LineSegments(
-        new THREE.EdgesGeometry(mesh.geometry, GHOST_EDGE_THRESHOLD_DEGREES),
-        lineMaterial,
-      );
-      edges.name = `${mesh.name || 'dress'} edge ghost`;
-      edges.renderOrder = 7;
-      edges.frustumCulled = false;
-      mesh.add(edges);
-    }
-  });
-
-  originalTextures.forEach((texture) => texture.dispose());
-  originalMaterials.forEach((sourceMaterial) => sourceMaterial.dispose());
-}
-
-function rebuildGhostPickTargets() {
-  ghostPickTargets.length = 0;
-  ghostDressCache.forEach((record) => {
-    if (!record.root.visible) {
-      return;
-    }
-
-    ghostPickTargets.push(...record.pickTargets);
-  });
-}
-
-function updateGhostVisibility(desiredGhostIds = getDesiredGhostAssetIds()) {
-  const visibleGhostIds = new Set(desiredGhostIds);
-  const visibleOrderedIds = DRESS_ASSET_ORDER.filter((assetId) => visibleGhostIds.has(assetId));
-  const blue = isBlueStackTheme();
-  const invisibleCities = cycloramaBackgroundSettings.preset === 'mew-holo';
-  // Signal Black shows the ghost dresses only as nodes in the diptych graph (HTML
-  // canvases reusing the thumbnail scenes), so suppress them in the main 3D scene.
-  const signal = cycloramaBackgroundSettings.preset === 'signal-black';
-
-  ghostDressCache.forEach((record, assetId) => {
-    const visibleInScene = !blue && !invisibleCities && !signal && visibleGhostIds.has(assetId) && assetId !== dressAssetSettings.asset;
-    record.root.visible = visibleInScene;
-
-    if (visibleInScene) {
-      applyGhostLayout(record, visibleOrderedIds);
-    }
-
-    syncDressThumbnailFromGhost(record);
-  });
-
-  syncGhostDepthMode();
-  rebuildGhostPickTargets();
-  renderDressThumbnails();
-  updateDebugState();
-}
 
 // Ghosts should read as a middle layer: above decorative background sculptures,
 // then covered by the active dress when the sharp subject overlay renders.
-function syncGhostDepthMode() {
-  const windArchive = cycloramaBackgroundSettings.preset === 'tabla-rasa';
 
-  ghostDressCache.forEach((record) => {
-    [record.material, record.fillMaterial, record.wireMaterial].forEach((ghostMaterial) => {
-      // Wind Archive places a single ghost behind the subject. It still needs
-      // transparent materials, but it must depth-test so the opaque active
-      // dress can cover any overlapping part of the ghost.
-      ghostMaterial.depthTest = windArchive;
-      ghostMaterial.depthWrite = false;
-      ghostMaterial.needsUpdate = true;
-    });
-  });
-}
 
-function getDesiredGhostAssetIds(): DressAssetId[] {
-  const activeAssetId = dressAssetSettings.asset;
 
-  if (cycloramaBackgroundSettings.preset === 'mew-holo') {
-    return [];
-  }
 
-  if (isBlueStackTheme()) {
-    return DRESS_ASSET_ORDER;
-  }
 
-  // Signal Black needs both dresses loaded as ghosts so both graph nodes can
-  // render the wireframe in the diptych viz.
-  if (cycloramaBackgroundSettings.preset === 'signal-black') {
-    return DRESS_ASSET_ORDER;
-  }
-
-  if (cycloramaBackgroundSettings.preset === 'tabla-rasa') {
-    const activeIndex = DRESS_ASSET_ORDER.indexOf(activeAssetId);
-    const nextAssetId = DRESS_ASSET_ORDER[
-      (Math.max(0, activeIndex) + 1) % DRESS_ASSET_ORDER.length
-    ];
-    return nextAssetId && nextAssetId !== activeAssetId ? [nextAssetId] : [];
-  }
-
-  const inactiveIds = DRESS_ASSET_ORDER.filter((assetId) => assetId !== activeAssetId);
-
-  if (!isMobileViewport()) {
-    return inactiveIds;
-  }
-
-  const activeIndex = DRESS_ASSET_ORDER.indexOf(activeAssetId);
-  return inactiveIds
-    .sort((a, b) => getDressOrderDistance(activeIndex, a) - getDressOrderDistance(activeIndex, b))
-    .slice(0, MOBILE_GHOST_LIMIT);
-}
-
-function getDressOrderDistance(activeIndex: number, assetId: DressAssetId) {
-  const index = DRESS_ASSET_ORDER.indexOf(assetId);
-
-  if (activeIndex < 0 || index < 0) {
-    return Number.POSITIVE_INFINITY;
-  }
-
-  return Math.abs(index - activeIndex);
-}
 
 function isMobileViewport() {
   return window.innerWidth < 720 || window.innerHeight > window.innerWidth * 1.12;
 }
 
-function applyGhostLayout(record: GhostDressRecord, visibleOrderedIds: DressAssetId[]) {
-  const portrait = isMobileViewport();
-  const aspect = window.innerWidth / Math.max(1, window.innerHeight);
-  const ivory = cycloramaBackgroundSettings.preset === 'ivory-holo';
-  const signal = cycloramaBackgroundSettings.preset === 'signal-black';
-  const windArchive = cycloramaBackgroundSettings.preset === 'tabla-rasa';
-  const ghostIndex = Math.max(0, visibleOrderedIds.indexOf(record.asset.id));
-  const centerOffset = (Math.max(1, visibleOrderedIds.length) - 1) * 0.5;
-  const verticalOffset = (ghostIndex - centerOffset) * (portrait ? 0.28 : 0.34);
 
-  if (windArchive) {
-    record.root.position.set(
-      portrait ? 0.72 : 1.72,
-      portrait ? 0.2 : 0.38,
-      portrait ? -0.9 : -0.82,
-    );
-    record.root.rotation.y = -0.32;
-    record.root.scale.setScalar(portrait ? 0.3 : 0.56);
-
-    record.material.color.setHex(0x63737c);
-    record.material.opacity = 0.55;
-    record.material.depthTest = true;
-    record.material.depthWrite = false;
-    record.material.needsUpdate = true;
-    record.fillMaterial.color.setHex(0xf5f9fb);
-    record.fillMaterial.opacity = 0.015;
-    record.fillMaterial.depthTest = true;
-    record.fillMaterial.depthWrite = false;
-    record.fillMaterial.needsUpdate = true;
-    record.wireMaterial.color.setHex(0x63737c);
-    record.wireMaterial.opacity = 0.09;
-    record.wireMaterial.depthTest = true;
-    record.wireMaterial.depthWrite = false;
-    record.wireMaterial.needsUpdate = true;
-    return;
-  }
-
-  const radiusX = portrait ? 0.92 : aspect > 1.35 ? 2.16 : 1.72;
-  const depth = portrait ? -0.82 : -1.08;
-
-  record.root.position.set(
-    -radiusX,
-    verticalOffset,
-    depth - Math.abs(verticalOffset) * 0.16,
-  );
-  record.root.rotation.y = portrait ? 0.28 : 0.38;
-  record.root.scale.setScalar(portrait ? 0.36 : 0.52);
-
-  const lineColor = ivory ? 0x4b3026 : signal ? 0x00e2ff : 0x234c55;
-  const fillColor = ivory ? 0xf4e8d6 : signal ? 0x00e2ff : 0xfff3d8;
-  record.material.color.set(lineColor);
-  record.material.opacity = ivory ? 0.95 : signal ? 0.86 : 0.92;
-  record.material.depthTest = false;
-  record.material.depthWrite = false;
-  record.material.needsUpdate = true;
-  record.fillMaterial.color.set(fillColor);
-  record.fillMaterial.opacity = ivory ? 0.18 : signal ? 0.11 : 0.14;
-  record.fillMaterial.depthTest = false;
-  record.fillMaterial.depthWrite = false;
-  record.fillMaterial.needsUpdate = true;
-  record.wireMaterial.color.set(lineColor);
-  record.wireMaterial.opacity = ivory ? 0.34 : signal ? 0.3 : 0.34;
-  record.wireMaterial.depthTest = false;
-  record.wireMaterial.depthWrite = false;
-  record.wireMaterial.needsUpdate = true;
-}
-
-function isSignalBlackTheme() {
-  return cycloramaBackgroundSettings.preset === 'signal-black';
-}
 
 function isBlueStackTheme() {
   return cycloramaBackgroundSettings.preset === 'blue';
@@ -2754,7 +1767,7 @@ function isPhysicalCycloramaTheme() {
 }
 
 function handleCanvasPointerDown(event: PointerEvent) {
-  if (selectGhostFromPointer(event)) {
+  if (ghostDressSystem?.select(event)) {
     event.preventDefault();
     return;
   }
@@ -2762,60 +1775,11 @@ function handleCanvasPointerDown(event: PointerEvent) {
   handlePointerMove(event);
 }
 
-function selectGhostFromPointer(event: PointerEvent) {
-  if (ghostPickTargets.length === 0) {
-    return false;
-  }
 
-  const bounds = canvasElement.getBoundingClientRect();
-  ghostPointer.set(
-    ((event.clientX - bounds.left) / bounds.width) * 2 - 1,
-    -((event.clientY - bounds.top) / bounds.height) * 2 + 1,
-  );
-  ghostRaycaster.setFromCamera(ghostPointer, camera);
-  dressGhostGroup.updateMatrixWorld(true);
 
-  const intersections = ghostRaycaster.intersectObjects(ghostPickTargets, false);
-  const hit = intersections.find((intersection) => isObjectWorldVisible(intersection.object));
-  const assetId = hit ? findDressAssetFromObject(hit.object) : null;
 
-  if (!assetId || assetId === dressAssetSettings.asset) {
-    return false;
-  }
 
-  void loadDressAsset(assetId);
-  return true;
-}
 
-function findDressAssetFromObject(object: THREE.Object3D): DressAssetId | null {
-  let current: THREE.Object3D | null = object;
-
-  while (current) {
-    const assetId = current.userData.dressAsset;
-
-    if (isDressAssetId(assetId)) {
-      return assetId;
-    }
-
-    current = current.parent;
-  }
-
-  return null;
-}
-
-function isObjectWorldVisible(object: THREE.Object3D) {
-  let current: THREE.Object3D | null = object;
-
-  while (current) {
-    if (!current.visible) {
-      return false;
-    }
-
-    current = current.parent;
-  }
-
-  return true;
-}
 
 function createArmBloomController(targets: THREE.Object3D | THREE.Object3D[]): ArmBloomController {
   // Emissive light is a material property: it makes a surface appear to emit
@@ -2997,10 +1961,29 @@ function addStudio(targetScene: THREE.Scene) {
   yellowBacking.position.set(0, (CYCLO_WALL_HEIGHT + 0.75) * 0.5, CYCLO_BACK_Z - 0.18);
   yellowBacking.visible = false;
   targetScene.add(yellowBacking);
-  initializePhotoPrintBursts(targetScene);
-  holoAccentGroup = addMewHoloAccents(targetScene);
-  ivorySculptureGroup = addIvoryHoloSculptures(targetScene);
-  signalBlackGroup = addSignalBlackAccents(targetScene);
+  photoPrintSystem = new PhotoPrintSystem({
+    scene: targetScene,
+    camera,
+    renderer,
+    canvas: canvasElement,
+    stage: stageElement,
+    resources: resourceTracker,
+    getThemeId: () => cycloramaBackgroundSettings.preset,
+    getFullDresses: () => fullDressStore.records,
+    getPointerWind: () => pointerWind,
+    isMobileViewport,
+  });
+  photoPrintGroup = photoPrintSystem.group;
+  holoSculptureSystem = new HoloSculptureSystem({
+    scene: targetScene,
+    resources: resourceTracker,
+    renderer,
+    camera,
+    getPointerWind: () => pointerWind,
+  });
+  holoAccentGroup = holoSculptureSystem.holoAccentGroup;
+  ivorySculptureGroup = holoSculptureSystem.ivorySculptureGroup;
+  signalBlackGroup = holoSculptureSystem.signalBlackGroup;
 
   cycloramaMaterial = trackMaterial(
     // MeshStandardMaterial is physically based (PBR). Roughness 1 is matte,
@@ -3107,1251 +2090,81 @@ function addStudio(targetScene: THREE.Scene) {
   targetScene.add(paperRollMesh);
 }
 
-function addSignalBlackAccents(targetScene: THREE.Scene) {
-  const group = new THREE.Group();
-  group.name = 'signal black quiet field';
-  group.visible = false;
-  targetScene.add(group);
-  return group;
-}
-
-function createShardGeometry() {
-  const geometry = new THREE.BufferGeometry();
-  const positions = new Float32Array([
-    -0.52, -0.18, 0,
-    -0.08, 0.28, 0,
-    0.58, 0.12, 0,
-    0.18, -0.34, 0,
-  ]);
-  const uvs = new Float32Array([
-    0, 0,
-    0.35, 1,
-    1, 0.72,
-    0.68, 0,
-  ]);
-
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-  geometry.setIndex([0, 1, 2, 0, 2, 3]);
-  geometry.computeVertexNormals();
-
-  return geometry;
-}
-
-function createLongShardGeometry() {
-  const geometry = new THREE.BufferGeometry();
-  const positions = new Float32Array([
-    -0.72, -0.06, 0,
-    -0.2, 0.14, 0,
-    0.76, 0.06, 0,
-    0.26, -0.18, 0,
-  ]);
-  const uvs = new Float32Array([
-    0, 0.22,
-    0.3, 0.92,
-    1, 0.68,
-    0.64, 0,
-  ]);
-
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-  geometry.setIndex([0, 1, 2, 0, 2, 3]);
-  geometry.computeVertexNormals();
-
-  return geometry;
-}
-
-function rememberHoloPaletteMaterial<T extends THREE.Material>(
-  material: T,
-  color: number,
-  opacity = material.opacity,
-) {
-  const paletteMaterial = material as PaletteMaterial;
-  material.userData.holoPalette = {
-    color,
-    opacity,
-    roughness: paletteMaterial.roughness,
-    clearcoat: paletteMaterial.clearcoat,
-    clearcoatRoughness: paletteMaterial.clearcoatRoughness,
-    envMapIntensity: paletteMaterial.envMapIntensity,
-    iridescence: paletteMaterial.iridescence,
-  };
-
-  return material;
-}
-
-function applyHoloAccentPalette(presetId = cycloramaBackgroundSettings.preset) {
-  if (!holoAccentGroup) {
-    return;
-  }
-
-  const monochrome = presetId === 'tabla-rasa';
-  const seenMaterials = new Set<string>();
-  let monochromeIndex = 0;
-
-  holoAccentGroup.traverse((object) => {
-    if (!(object instanceof THREE.Mesh)) {
-      return;
-    }
-
-    const materials = Array.isArray(object.material) ? object.material : [object.material];
-    materials.forEach((sourceMaterial) => {
-      const material = sourceMaterial as PaletteMaterial;
-      const base = material.userData.holoPalette as
-        | {
-            color: number;
-            opacity: number;
-            roughness?: number;
-            clearcoat?: number;
-            clearcoatRoughness?: number;
-            envMapIntensity?: number;
-            iridescence?: number;
-          }
-        | undefined;
-
-      if (!base || seenMaterials.has(material.uuid)) {
-        return;
-      }
-
-      seenMaterials.add(material.uuid);
-
-      if (monochrome) {
-        material.color?.setHex(TABLA_RASA_ACCENT_COLORS[monochromeIndex % TABLA_RASA_ACCENT_COLORS.length]);
-        material.opacity = Math.min(base.opacity, 0.72);
-        if (material.roughness !== undefined) {
-          material.roughness = Math.max(base.roughness ?? material.roughness, 0.28);
-        }
-        if (material.clearcoat !== undefined) {
-          material.clearcoat = Math.min(base.clearcoat ?? material.clearcoat, 0.45);
-        }
-        if (material.clearcoatRoughness !== undefined) {
-          material.clearcoatRoughness = Math.max(base.clearcoatRoughness ?? material.clearcoatRoughness, 0.16);
-        }
-        if (material.envMapIntensity !== undefined) {
-          material.envMapIntensity = Math.min(base.envMapIntensity ?? material.envMapIntensity, 0.86);
-        }
-        if (material.iridescence !== undefined) {
-          material.iridescence = 0.015;
-        }
-        monochromeIndex += 1;
-      } else {
-        material.color?.setHex(base.color);
-        material.opacity = base.opacity;
-        if (material.roughness !== undefined && base.roughness !== undefined) {
-          material.roughness = base.roughness;
-        }
-        if (material.clearcoat !== undefined && base.clearcoat !== undefined) {
-          material.clearcoat = base.clearcoat;
-        }
-        if (material.clearcoatRoughness !== undefined && base.clearcoatRoughness !== undefined) {
-          material.clearcoatRoughness = base.clearcoatRoughness;
-        }
-        if (material.envMapIntensity !== undefined && base.envMapIntensity !== undefined) {
-          material.envMapIntensity = base.envMapIntensity;
-        }
-        if (material.iridescence !== undefined && base.iridescence !== undefined) {
-          material.iridescence = base.iridescence;
-        }
-      }
-
-      material.needsUpdate = true;
-    });
-  });
-}
-
-function addMewHoloAccents(targetScene: THREE.Scene) {
-  const group = new THREE.Group();
-  group.name = 'mew holo floating foil accents';
-  group.visible = false;
-
-  const makeMaterial = (color: number, opacity: number) => {
-    const material = trackMaterial(
-      new THREE.MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        toneMapped: false,
-      }),
-    );
-    return rememberHoloPaletteMaterial(material, color, opacity);
-  };
-
-  const pink = makeMaterial(0xff22b8, 0.34);
-  const green = makeMaterial(0x63ff28, 0.34);
-  const yellow = makeMaterial(0xffec0f, 0.4);
-  const cyan = makeMaterial(0x35f1ff, 0.3);
-  const violet = makeMaterial(0x8d45ff, 0.26);
-  const pearl = makeMaterial(0xfff1c4, 0.38);
-
-  const shardGeometry = trackGeometry(createShardGeometry());
-  const longShardGeometry = trackGeometry(createLongShardGeometry());
-
-  const accents: Array<{
-    geometry: THREE.BufferGeometry;
-    material: THREE.Material;
-    position: [number, number, number];
-    scale: [number, number, number];
-    rotation?: number;
-  }> = [
-    { geometry: longShardGeometry, material: pink, position: [-3.12, 1.38, CYCLO_BACK_Z + 0.18], scale: [1.25, 0.72, 1], rotation: -0.34 },
-    { geometry: shardGeometry, material: green, position: [2.86, 2.08, CYCLO_BACK_Z + 0.2], scale: [0.54, 0.42, 1], rotation: 0.58 },
-    { geometry: shardGeometry, material: yellow, position: [2.72, 3.28, CYCLO_BACK_Z + 0.22], scale: [0.72, 0.52, 1], rotation: -0.22 },
-    { geometry: longShardGeometry, material: cyan, position: [-1.04, 3.1, CYCLO_BACK_Z + 0.2], scale: [0.78, 0.28, 1], rotation: 0.72 },
-    { geometry: shardGeometry, material: violet, position: [0.96, 1.24, CYCLO_BACK_Z + 0.2], scale: [0.58, 0.46, 1], rotation: 1.12 },
-    { geometry: shardGeometry, material: green, position: [-2.05, 2.62, CYCLO_BACK_Z + 0.19], scale: [0.48, 0.36, 1], rotation: -0.94 },
-    { geometry: longShardGeometry, material: pearl, position: [1.75, 2.8, CYCLO_BACK_Z + 0.24], scale: [0.82, 0.28, 1], rotation: -0.68 },
-    { geometry: longShardGeometry, material: pink, position: [-2.55, 3.25, CYCLO_BACK_Z + 0.25], scale: [0.68, 0.26, 1], rotation: 0.36 },
-    { geometry: shardGeometry, material: yellow, position: [3.35, 1.1, CYCLO_BACK_Z + 0.23], scale: [0.42, 0.34, 1], rotation: -1.12 },
-  ];
-
-  accents.forEach((accent, index) => {
-    const mesh = new THREE.Mesh(accent.geometry, accent.material);
-    mesh.position.set(...accent.position);
-    mesh.scale.set(...accent.scale);
-    mesh.rotation.z = accent.rotation ?? index * 0.22;
-    mesh.renderOrder = 1;
-    group.add(mesh);
-    registerHoloSculptureMotion(
-      mesh,
-      0.018 + (index % 3) * 0.006,
-      0.42 + (index % 4) * 0.08,
-      new THREE.Vector3(0.08 + index * 0.006, 0.12 + index * 0.004, 0.1),
-      index * 0.53,
-    );
-  });
-
-  addMewHoloSculptures(group);
-  targetScene.add(group);
-  return group;
-}
-
-function addIvoryHoloSculptures(targetScene: THREE.Scene) {
-  const group = new THREE.Group();
-  group.name = 'ivory grounded holo sculptures';
-  group.visible = false;
-
-  const marbleMaterial = createIvoryMarbleMaterial();
-  const glossMaterial = createIvoryGlossMaterial(0xfffbf0, 0.98);
-  const translucentMaterial = createIvoryGlossMaterial(0xcfc4b5, 0.82);
-  const blobGeometry = trackGeometry(new THREE.SphereGeometry(1, 40, 22));
-
-  const fallenColumn = createGroundedColumnFragment(marbleMaterial, glossMaterial);
-  fallenColumn.position.set(-1.18, 0.34, -0.72);
-  fallenColumn.rotation.set(0.1, 0.16, -0.28);
-  fallenColumn.scale.setScalar(1.58);
-  group.add(fallenColumn);
-
-  const largeGoop = createGroundedIvoryGoop(blobGeometry, glossMaterial, translucentMaterial);
-  largeGoop.position.set(1.14, 0.34, -0.68);
-  largeGoop.rotation.set(0, -0.24, 0);
-  largeGoop.scale.setScalar(1.56);
-  group.add(largeGoop);
-
-  const amphora = createGroundedIvoryAmphora(marbleMaterial, glossMaterial);
-  amphora.position.set(1.62, 0.65, -0.96);
-  amphora.rotation.set(0.08, -0.52, 0.03);
-  amphora.scale.setScalar(1.02);
-  group.add(amphora);
-
-  const lowRing = new THREE.Mesh(trackGeometry(new THREE.TorusGeometry(0.66, 0.075, 18, 96)), translucentMaterial);
-  lowRing.position.set(-0.38, 0.18, -0.86);
-  lowRing.rotation.set(Math.PI * 0.5, 0.08, 0.2);
-  lowRing.scale.set(1.62, 1.02, 1);
-  group.add(lowRing);
-
-  const pearlStone = new THREE.Mesh(blobGeometry, glossMaterial);
-  pearlStone.position.set(-1.72, 0.28, -0.98);
-  pearlStone.scale.set(0.72, 0.38, 0.52);
-  group.add(pearlStone);
-
-  addIvoryGroundedSilhouettes(group);
-
-  targetScene.add(group);
-  return group;
-}
-
-function addIvoryGroundedSilhouettes(group: THREE.Group) {
-  const material = trackMaterial(
-    new THREE.MeshBasicMaterial({
-      color: 0xb8afa2,
-      transparent: true,
-      opacity: 0.32,
-      depthWrite: false,
-      toneMapped: false,
-      side: THREE.DoubleSide,
-    }),
-  );
-  const softDisc = trackGeometry(new THREE.CircleGeometry(1, 96));
-  const silhouettes: Array<{
-    position: [number, number, number];
-    scale: [number, number, number];
-    rotation: number;
-  }> = [
-    { position: [-1.18, 0.022, -0.68], scale: [1.85, 0.58, 1], rotation: -0.22 },
-    { position: [1.18, 0.024, -0.62], scale: [1.72, 0.72, 1], rotation: 0.12 },
-    { position: [0.1, 0.02, -0.92], scale: [1.2, 0.42, 1], rotation: 0.04 },
-  ];
-
-  silhouettes.forEach((silhouette) => {
-    const mesh = new THREE.Mesh(softDisc, material);
-    mesh.position.set(...silhouette.position);
-    mesh.rotation.set(-Math.PI * 0.5, 0, silhouette.rotation);
-    mesh.scale.set(...silhouette.scale);
-    mesh.renderOrder = -1;
-    group.add(mesh);
-  });
-}
-
-function createGroundedColumnFragment(marbleMaterial: THREE.Material, glossMaterial: THREE.Material) {
-  const group = new THREE.Group();
-  group.name = 'grounded ivory column fragment';
-  const shaft = new THREE.Mesh(trackGeometry(new THREE.CylinderGeometry(0.22, 0.24, 1.55, 36)), marbleMaterial);
-  const base = new THREE.Mesh(trackGeometry(new THREE.CylinderGeometry(0.38, 0.42, 0.16, 52)), marbleMaterial);
-  const capital = new THREE.Mesh(trackGeometry(new THREE.CylinderGeometry(0.4, 0.28, 0.18, 52)), marbleMaterial);
-  const glossSeam = new THREE.Mesh(trackGeometry(new THREE.TorusGeometry(0.3, 0.045, 14, 64)), glossMaterial);
-
-  shaft.rotation.z = Math.PI * 0.5;
-  base.rotation.z = Math.PI * 0.5;
-  capital.rotation.z = Math.PI * 0.5;
-  base.position.x = -0.86;
-  capital.position.x = 0.86;
-  glossSeam.position.set(-0.34, 0.0, 0.03);
-  glossSeam.rotation.y = Math.PI * 0.5;
-
-  group.add(shaft, base, capital, glossSeam);
-  return group;
-}
-
-function createGroundedIvoryGoop(
-  blobGeometry: THREE.BufferGeometry,
-  glossMaterial: THREE.Material,
-  translucentMaterial: THREE.Material,
-) {
-  const group = new THREE.Group();
-  group.name = 'grounded ivory glossy goop';
-  const blobs: Array<{ position: [number, number, number]; scale: [number, number, number]; material: THREE.Material }> = [
-    { position: [0, 0.06, 0], scale: [0.72, 0.28, 0.52], material: glossMaterial },
-    { position: [0.45, 0.11, 0.08], scale: [0.48, 0.34, 0.34], material: translucentMaterial },
-    { position: [-0.46, 0.08, -0.12], scale: [0.52, 0.25, 0.4], material: glossMaterial },
-    { position: [0.12, 0.28, -0.05], scale: [0.32, 0.4, 0.3], material: translucentMaterial },
-  ];
-
-  blobs.forEach((blob) => {
-    const mesh = new THREE.Mesh(blobGeometry, blob.material);
-    mesh.position.set(...blob.position);
-    mesh.scale.set(...blob.scale);
-    group.add(mesh);
-  });
-
-  return group;
-}
-
-function createGroundedIvoryAmphora(marbleMaterial: THREE.Material, glossMaterial: THREE.Material) {
-  const group = new THREE.Group();
-  group.name = 'grounded ivory amphora';
-  const points = [
-    new THREE.Vector2(0.1, -0.56),
-    new THREE.Vector2(0.28, -0.42),
-    new THREE.Vector2(0.38, -0.08),
-    new THREE.Vector2(0.32, 0.22),
-    new THREE.Vector2(0.18, 0.44),
-    new THREE.Vector2(0.14, 0.62),
-    new THREE.Vector2(0.23, 0.7),
-  ];
-  const body = new THREE.Mesh(trackGeometry(new THREE.LatheGeometry(points, 56)), marbleMaterial);
-  const lip = new THREE.Mesh(trackGeometry(new THREE.TorusGeometry(0.23, 0.026, 10, 56)), glossMaterial);
-  const foot = new THREE.Mesh(trackGeometry(new THREE.CylinderGeometry(0.22, 0.28, 0.08, 48)), glossMaterial);
-
-  lip.position.y = 0.7;
-  lip.rotation.x = Math.PI * 0.5;
-  foot.position.y = -0.58;
-  group.add(body, lip, foot);
-  return group;
-}
-
-function addMewHoloSculptures(group: THREE.Group) {
-  const marbleMaterial = createHoloMarbleMaterial();
-  const pinkGloss = createCandyGlossMaterial(0xff2db6, 0.72);
-  const greenGloss = createCandyGlossMaterial(0x75ff2c, 0.68);
-  const yellowGloss = createCandyGlossMaterial(0xffe80f, 0.72);
-  const cyanGloss = createCandyGlossMaterial(0x27eaff, 0.58);
-  const violetGloss = createCandyGlossMaterial(0x8d55ff, 0.62);
-
-  const blobGeometry = trackGeometry(new THREE.SphereGeometry(1, 32, 18));
-  const gemGeometry = trackGeometry(new THREE.OctahedronGeometry(0.45, 1));
-  const torusKnotGeometry = trackGeometry(new THREE.TorusKnotGeometry(0.34, 0.105, 96, 14, 2, 3));
-
-  const leftColumn = createGrecoColumnFragment(marbleMaterial, pinkGloss);
-  leftColumn.position.set(-2.88, 1.18, -0.95);
-  leftColumn.rotation.set(0.12, 0.18, -0.16);
-  leftColumn.scale.setScalar(0.62);
-  group.add(leftColumn);
-  registerHoloSculptureMotion(leftColumn, 0.045, 0.56, new THREE.Vector3(0.04, 0.11, 0.035), 0.2);
-
-  const rightColumn = createGrecoColumnFragment(marbleMaterial, greenGloss);
-  rightColumn.position.set(2.82, 1.52, -1.25);
-  rightColumn.rotation.set(-0.08, -0.38, 0.14);
-  rightColumn.scale.setScalar(0.5);
-  group.add(rightColumn);
-  registerHoloSculptureMotion(rightColumn, 0.06, 0.48, new THREE.Vector3(-0.035, 0.08, -0.03), 1.6);
-
-  const amphora = createHoloAmphora(marbleMaterial, yellowGloss);
-  amphora.position.set(2.16, 2.6, -1.34);
-  amphora.rotation.set(0.1, -0.45, 0.08);
-  amphora.scale.setScalar(0.42);
-  group.add(amphora);
-  registerHoloSculptureMotion(amphora, 0.075, 0.42, new THREE.Vector3(0.025, 0.12, 0.04), 2.3);
-
-  const leftGoop = createGoopCluster(blobGeometry, pinkGloss, violetGloss);
-  leftGoop.position.set(-2.32, 2.22, -1.1);
-  leftGoop.rotation.set(0.2, 0.15, -0.12);
-  leftGoop.scale.setScalar(0.78);
-  group.add(leftGoop);
-  registerHoloSculptureMotion(leftGoop, 0.085, 0.66, new THREE.Vector3(0.05, 0.18, 0.05), 0.9);
-
-  const rightGoop = createGoopCluster(blobGeometry, greenGloss, cyanGloss);
-  rightGoop.position.set(2.36, 0.92, -0.74);
-  rightGoop.rotation.set(-0.16, -0.24, 0.2);
-  rightGoop.scale.setScalar(0.62);
-  group.add(rightGoop);
-  registerHoloSculptureMotion(rightGoop, 0.07, 0.72, new THREE.Vector3(-0.04, 0.2, -0.06), 2.9);
-
-  const centerGem = new THREE.Mesh(gemGeometry, cyanGloss);
-  centerGem.position.set(-0.92, 2.84, -1.18);
-  centerGem.scale.set(0.5, 0.74, 0.5);
-  group.add(centerGem);
-  registerHoloSculptureMotion(centerGem, 0.1, 0.54, new THREE.Vector3(0.18, 0.32, 0.08), 1.2);
-
-  const yellowGem = new THREE.Mesh(gemGeometry, yellowGloss);
-  yellowGem.position.set(3.28, 2.64, -1.08);
-  yellowGem.scale.set(0.42, 0.64, 0.42);
-  group.add(yellowGem);
-  registerHoloSculptureMotion(yellowGem, 0.08, 0.58, new THREE.Vector3(-0.14, 0.24, 0.11), 3.4);
-
-  const knot = new THREE.Mesh(torusKnotGeometry, pinkGloss);
-  knot.position.set(-1.72, 0.88, -0.7);
-  knot.rotation.set(0.72, 0.26, 0.15);
-  knot.scale.setScalar(0.7);
-  group.add(knot);
-  registerHoloSculptureMotion(knot, 0.06, 0.64, new THREE.Vector3(0.16, -0.22, 0.18), 4.2);
-}
-
-function createGrecoColumnFragment(marbleMaterial: THREE.Material, goopMaterial: THREE.Material) {
-  const group = new THREE.Group();
-  group.name = 'holo marble column fragment';
-  const shaft = new THREE.Mesh(trackGeometry(new THREE.CylinderGeometry(0.18, 0.22, 1.18, 32)), marbleMaterial);
-  const base = new THREE.Mesh(trackGeometry(new THREE.CylinderGeometry(0.32, 0.36, 0.12, 48)), marbleMaterial);
-  const capital = new THREE.Mesh(trackGeometry(new THREE.CylinderGeometry(0.3, 0.22, 0.16, 48)), marbleMaterial);
-  const goopBand = new THREE.Mesh(trackGeometry(new THREE.TorusGeometry(0.27, 0.065, 18, 64)), goopMaterial);
-  const goopDrop = new THREE.Mesh(trackGeometry(new THREE.SphereGeometry(0.12, 24, 14)), goopMaterial);
-
-  shaft.position.y = 0.04;
-  shaft.rotation.z = 0.02;
-  base.position.y = -0.62;
-  capital.position.y = 0.68;
-  goopBand.position.y = 0.22;
-  goopBand.rotation.x = Math.PI * 0.5;
-  goopDrop.position.set(0.18, -0.08, 0.1);
-  goopDrop.scale.set(0.8, 1.55, 0.7);
-
-  group.add(base, shaft, capital, goopBand, goopDrop);
-  return group;
-}
-
-function createHoloAmphora(marbleMaterial: THREE.Material, glossMaterial: THREE.Material) {
-  const group = new THREE.Group();
-  group.name = 'holo amphora sculpture';
-  const points = [
-    new THREE.Vector2(0.08, -0.52),
-    new THREE.Vector2(0.2, -0.42),
-    new THREE.Vector2(0.3, -0.16),
-    new THREE.Vector2(0.26, 0.16),
-    new THREE.Vector2(0.16, 0.38),
-    new THREE.Vector2(0.12, 0.56),
-    new THREE.Vector2(0.2, 0.64),
-  ];
-  const body = new THREE.Mesh(trackGeometry(new THREE.LatheGeometry(points, 48)), marbleMaterial);
-  const lip = new THREE.Mesh(trackGeometry(new THREE.TorusGeometry(0.2, 0.025, 10, 48)), glossMaterial);
-  const leftHandle = new THREE.Mesh(trackGeometry(new THREE.TorusGeometry(0.18, 0.025, 10, 48, Math.PI * 1.3)), glossMaterial);
-  const rightHandle = leftHandle.clone();
-
-  lip.position.y = 0.64;
-  lip.rotation.x = Math.PI * 0.5;
-  leftHandle.position.set(-0.24, 0.12, 0);
-  leftHandle.rotation.set(0, 0, Math.PI * 0.52);
-  leftHandle.scale.set(0.62, 1.1, 0.62);
-  rightHandle.position.set(0.24, 0.12, 0);
-  rightHandle.rotation.set(0, 0, -Math.PI * 0.52);
-  rightHandle.scale.set(0.62, 1.1, 0.62);
-
-  group.add(body, lip, leftHandle, rightHandle);
-  return group;
-}
-
-function createGoopCluster(
-  blobGeometry: THREE.BufferGeometry,
-  primaryMaterial: THREE.Material,
-  secondaryMaterial: THREE.Material,
-) {
-  const group = new THREE.Group();
-  group.name = 'glossy goop cluster';
-  const blobs: Array<{ position: [number, number, number]; scale: [number, number, number]; material: THREE.Material }> = [
-    { position: [0, 0, 0], scale: [0.48, 0.62, 0.35], material: primaryMaterial },
-    { position: [0.28, 0.08, 0.1], scale: [0.3, 0.38, 0.26], material: secondaryMaterial },
-    { position: [-0.24, -0.14, -0.05], scale: [0.34, 0.28, 0.25], material: primaryMaterial },
-    { position: [0.05, -0.38, 0.02], scale: [0.16, 0.36, 0.12], material: secondaryMaterial },
-  ];
-
-  blobs.forEach((blob) => {
-    const mesh = new THREE.Mesh(blobGeometry, blob.material);
-    mesh.position.set(...blob.position);
-    mesh.scale.set(...blob.scale);
-    group.add(mesh);
-  });
-
-  return group;
-}
-
-function registerHoloSculptureMotion(
-  root: THREE.Object3D,
-  floatAmplitude: number,
-  floatSpeed: number,
-  spin: THREE.Vector3,
-  phase: number,
-) {
-  holoSculptureMotions.push({
-    root,
-    basePosition: root.position.clone(),
-    baseRotation: root.rotation.clone(),
-    windOffset: new THREE.Vector3(),
-    windVelocity: new THREE.Vector3(),
-    angularOffset: new THREE.Vector3(),
-    angularVelocity: new THREE.Vector3(),
-    floatAmplitude,
-    floatSpeed,
-    phase,
-    spin,
-    windScale: 0.68 + (phase % 1.7) * 0.16,
-  });
-}
-
-function updateMewHoloSculptures(time: number, delta: number) {
-  if (!holoAccentGroup?.visible) {
-    return;
-  }
-
-  const activity = clamp01(pointerWind.activity);
-  holoWindForce.copy(pointerWind.wind).multiplyScalar(activity);
-
-  holoSculptureMotions.forEach((motion) => {
-    motion.root.getWorldPosition(holoWorldPosition);
-    holoWorldPosition.project(camera);
-    holoScreenPosition.set(
-      holoWorldPosition.x * 0.5 + 0.5,
-      holoWorldPosition.y * 0.5 + 0.5,
-    );
-
-    holoCursorDelta.copy(pointerWind.gustCenter).sub(holoScreenPosition);
-    const cursorDistance = holoCursorDelta.length();
-    const tightField = 1 - THREE.MathUtils.smoothstep(cursorDistance, 0.04, 0.58);
-    const broadField = (1 - THREE.MathUtils.smoothstep(cursorDistance, 0.3, 1.18)) * 0.72;
-    const proximity = clamp01(tightField + broadField);
-
-    holoAwayFromCursor.copy(holoCursorDelta).multiplyScalar(-1);
-    if (holoAwayFromCursor.lengthSq() > 0.00001) {
-      holoAwayFromCursor.normalize();
-    } else {
-      holoAwayFromCursor.set(0, 1);
-    }
-
-    const cursorPush = proximity * motion.windScale * activity;
-    holoTargetOffset.set(
-      holoAwayFromCursor.x * cursorPush * 0.98 + holoWindForce.x * motion.windScale * 0.58,
-      holoAwayFromCursor.y * cursorPush * 0.64 + holoWindForce.y * motion.windScale * 0.52,
-      cursorPush * 0.32 + Math.abs(holoWindForce.x) * motion.windScale * 0.18 + holoWindForce.z * motion.windScale * 0.34,
-    );
-    holoTargetOffset.clampLength(0, 0.98);
-
-    holoOffsetDelta.copy(holoTargetOffset).sub(motion.windOffset);
-    motion.windVelocity.add(holoOffsetDelta.multiplyScalar(delta * 30));
-    motion.windVelocity.multiplyScalar(Math.exp(-delta * 3.9));
-    motion.windOffset.add(holoOffsetDelta.copy(motion.windVelocity).multiplyScalar(delta));
-    motion.windOffset.clampLength(0, 1.05);
-
-    holoTargetAngularOffset.set(
-      holoWindForce.y * motion.windScale * 0.72 - holoAwayFromCursor.y * cursorPush * 0.82,
-      holoWindForce.x * motion.windScale * 0.68 + holoAwayFromCursor.x * cursorPush * 0.86,
-      -holoWindForce.x * motion.windScale * 0.72 - holoAwayFromCursor.x * cursorPush * 0.48,
-    );
-    holoTargetAngularOffset.clampLength(0, 0.82);
-
-    holoAngularDelta.copy(holoTargetAngularOffset).sub(motion.angularOffset);
-    motion.angularVelocity.add(holoAngularDelta.multiplyScalar(delta * 28));
-    motion.angularVelocity.multiplyScalar(Math.exp(-delta * 4.1));
-    motion.angularOffset.add(holoAngularDelta.copy(motion.angularVelocity).multiplyScalar(delta));
-    motion.angularOffset.clampLength(0, 0.86);
-
-    const bob = Math.sin(time * motion.floatSpeed + motion.phase) * motion.floatAmplitude;
-    motion.root.position.copy(motion.basePosition);
-    motion.root.position.y += bob;
-    motion.root.position.add(motion.windOffset);
-    motion.root.rotation.set(
-      motion.baseRotation.x + Math.sin(time * 0.32 + motion.phase) * motion.spin.x + motion.angularOffset.x,
-      motion.baseRotation.y + time * motion.spin.y + motion.angularOffset.y,
-      motion.baseRotation.z + Math.cos(time * 0.28 + motion.phase) * motion.spin.z + motion.angularOffset.z,
-    );
-  });
-}
-
-function initializePhotoPrintBursts(targetScene: THREE.Scene) {
-  // -------------------------------------------------------------------------
-  // WIND ARCHIVE PRINT-PARTICLE SYSTEM
-  // -------------------------------------------------------------------------
-  // This is a small CPU particle system. Each particle is a Group containing
-  // three ordinary meshes: shadow, white paper, and image. The CPU updates
-  // transforms; the GPU rasterizes their shared plane geometries.
-  photoPrintGroup = new THREE.Group();
-  photoPrintGroup.name = 'wind archive falling photo prints';
-  photoPrintGroup.visible = cycloramaBackgroundSettings.preset === 'tabla-rasa';
-  targetScene.add(photoPrintGroup);
-
-  // Geometry is shared by every print. Reusing BufferGeometry avoids creating
-  // duplicate GPU vertex/index buffers on every pointer movement.
-  photoPrintCardGeometry = trackGeometry(new THREE.PlaneGeometry(PHOTO_PRINT_CARD_WIDTH, PHOTO_PRINT_CARD_HEIGHT));
-  photoPrintImageGeometry = trackGeometry(new THREE.PlaneGeometry(PHOTO_PRINT_IMAGE_WIDTH, PHOTO_PRINT_IMAGE_HEIGHT));
-  photoPrintShadowGeometry = trackGeometry(
-    new THREE.PlaneGeometry(PHOTO_PRINT_CARD_WIDTH * 1.015, PHOTO_PRINT_CARD_HEIGHT * 1.015),
-  );
-  PHOTO_PRINT_IMAGE_URLS.forEach((url) => {
-    photoPrintTextures.push(loadPhotoPrintTexture(url));
-  });
-}
-
-function loadPhotoPrintTexture(url: string) {
-  const texture = trackTexture(new THREE.TextureLoader().load(url));
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
-  return texture;
-}
-
-function maybeSpawnPhotoPrintBurst(
-  x: number,
-  y: number,
-  movementX: number,
-  movementY: number,
-  now: number,
-) {
-  if (!isPhotoPrintTheme() || !photoPrintGroup || photoPrintTextures.length === 0) {
-    return;
-  }
-
-  if (isPointerOverVisibleDress(x, y)) {
-    return;
-  }
-
-  // Time throttling avoids a burst on every browser event; distance throttling
-  // ignores tiny hand jitter. Both are measured in normalized pointer space.
-  const distance = lastPhotoPrintBurstPoint.distanceTo(pointerSample.set(x, y));
-  const elapsed = now - lastPhotoPrintBurstTime;
-  const movementSpeed = Math.hypot(movementX, movementY);
-
-  if (elapsed < PHOTO_PRINT_BURST_INTERVAL || distance < PHOTO_PRINT_MIN_POINTER_DISTANCE) {
-    return;
-  }
-
-  if (movementSpeed < 0.08) {
-    return;
-  }
-
-  getPhotoPrintSpawnPosition(x, y, photoPrintSpawnPosition);
-  spawnPhotoPrint(photoPrintSpawnPosition, movementX, movementY);
-
-  lastPhotoPrintBurstPoint.set(x, y);
-  lastPhotoPrintBurstTime = now;
-}
-
-function isPointerOverVisibleDress(x: number, y: number) {
-  // Convert browser-normalized 0..1 coordinates to WebGL normalized device
-  // coordinates (-1..+1, with positive Y upward).
-  photoPrintDressPointer.set(x * 2 - 1, y * 2 - 1);
-  // setFromCamera builds a world-space ray beginning at the camera and passing
-  // through this screen point.
-  photoPrintDressRaycaster.setFromCamera(photoPrintDressPointer, camera);
-
-  for (const record of fullDressCache.values()) {
-    if (!record.pivot.visible) {
-      continue;
-    }
-
-    record.loaded.dress.updateMatrixWorld(true);
-    const intersections = photoPrintDressRaycaster.intersectObject(record.loaded.dress, true);
-    if (intersections.some((intersection) => (intersection.object as THREE.Mesh).isMesh)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function getPhotoPrintSpawnPosition(x: number, y: number, target: THREE.Vector3) {
-  photoPrintSpawnNdc.set(x * 2 - 1, y * 2 - 1);
-  photoPrintSpawnRaycaster.setFromCamera(photoPrintSpawnNdc, camera);
-
-  // Ray-plane intersection turns the 2D pointer into a 3D point at the chosen
-  // spawn depth. The fallback handles a theoretically parallel ray.
-  if (!photoPrintSpawnRaycaster.ray.intersectPlane(photoPrintSpawnPlane, target)) {
-    target.set((x - 0.5) * 4.6, 1.8 + (y - 0.5) * 2.2, PHOTO_PRINT_SPAWN_Z);
-  }
-
-  const spawnDepth = Math.abs(camera.position.z - PHOTO_PRINT_SPAWN_Z);
-  const visibleHalfHeight = Math.tan(THREE.MathUtils.degToRad(camera.fov) * 0.5) * spawnDepth;
-  const visibleHalfWidth = visibleHalfHeight * camera.aspect;
-  target.x = THREE.MathUtils.clamp(target.x, -visibleHalfWidth * 0.86, visibleHalfWidth * 0.86);
-  // Project back to normalized screen space so prints can be biased toward the
-  // side fields instead of appearing on top of the central dress.
-  photoPrintProjectionPoint.copy(target).project(camera);
-  const desiredScreenX = x < 0.5 ? -0.66 : 0.66;
-  target.x += (desiredScreenX - photoPrintProjectionPoint.x) * visibleHalfWidth;
-  target.y = THREE.MathUtils.clamp(target.y, 0.72, 3.38);
-  target.z = PHOTO_PRINT_SPAWN_Z;
-}
-
-function spawnPhotoPrint(position: THREE.Vector3, movementX: number, movementY: number) {
-  if (!photoPrintGroup || !photoPrintCardGeometry || !photoPrintImageGeometry || !photoPrintShadowGeometry) {
-    return;
-  }
-
-  const texture = photoPrintTextures[Math.floor(Math.random() * photoPrintTextures.length)];
-  const root = new THREE.Group();
-  const seed = Math.random() * Math.PI * 2;
-  const layer = photoPrintLayerCounter++;
-  // Reserve three consecutive render-order slots per print. Later prints have
-  // higher slots and therefore stack cleanly above earlier prints.
-  const layerRenderOrder = 10 + layer * 3;
-  const baseScale = canvasElement.clientWidth < 420
-    ? randomBetween(0.46, 0.68)
-    : isMobileViewport()
-    ? randomBetween(0.58, 0.84)
-    : randomBetween(0.72, 1);
-  const windLength = Math.max(0.001, Math.hypot(movementX, movementY));
-  const windDirX = movementX / windLength;
-  const windDirY = movementY / windLength;
-  const jitter = new THREE.Vector3(-windDirX * 0.18 + randomBetween(-0.035, 0.035), -windDirY * 0.1 + randomBetween(-0.03, 0.04), randomBetween(-0.06, 0.08));
-
-  root.position.copy(position).add(jitter);
-  const windHeading = Math.atan2(windDirY, windDirX);
-  root.rotation.set(
-    randomBetween(-1.45, 1.45),
-    randomBetween(-1.08, 1.08),
-    windHeading + randomBetween(-0.72, 0.72),
-  );
-  root.scale.setScalar(baseScale);
-  root.renderOrder = layerRenderOrder;
-
-  // MeshBasicMaterial ignores lights. That keeps print paper and photographs
-  // visually consistent as they cross differently lit regions of the scene.
-  const shadowMaterial = new THREE.MeshBasicMaterial({
-    color: 0x111111,
-    transparent: true,
-    opacity: 0,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-    toneMapped: false,
-  });
-  const cardMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffffff,
-    transparent: true,
-    opacity: 0,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-    toneMapped: false,
-  });
-  const imageMaterial = new THREE.MeshBasicMaterial({
-    map: texture,
-    color: 0xffffff,
-    transparent: true,
-    opacity: 0,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-    toneMapped: false,
-  });
-
-  const shadow = new THREE.Mesh(photoPrintShadowGeometry, shadowMaterial);
-  shadow.position.set(0.014, -0.016, -0.012);
-  shadow.renderOrder = layerRenderOrder;
-  const card = new THREE.Mesh(photoPrintCardGeometry, cardMaterial);
-  card.renderOrder = layerRenderOrder + 1;
-  const image = new THREE.Mesh(photoPrintImageGeometry, imageMaterial);
-  image.position.set(0, 0, 0.01);
-  image.renderOrder = layerRenderOrder + 2;
-  root.add(shadow, card, image);
-  photoPrintGroup.add(root);
-
-  const windX = clampSigned(movementX * 0.064, 1.45);
-  const windY = clampSigned(movementY * 0.058, 0.94);
-  const lift = randomBetween(0.36, 0.72) + Math.max(0, windY * 0.18);
-  // Quaternions compose rotations without Euler-order ambiguity. First tip the
-  // card onto the common floor, then rotate it within that plane.
-  const restQuaternion = new THREE.Quaternion()
-    .setFromAxisAngle(new THREE.Vector3(1, 0, 0), PHOTO_PRINT_SURFACE_TILT)
-    .multiply(
-      new THREE.Quaternion().setFromAxisAngle(
-        new THREE.Vector3(0, 0, 1),
-        windHeading + randomBetween(-0.5, 0.5),
-      ),
-    );
-
-  photoPrintParticles.push({
-    root,
-    velocity: new THREE.Vector3(
-      windX + windDirX * randomBetween(0.22, 0.58) + randomBetween(-0.08, 0.08),
-      lift,
-      randomBetween(-0.34, -0.1) + Math.abs(windX) * 0.035,
-    ),
-    angularVelocity: new THREE.Vector3(
-      randomBetween(-2.6, 2.6) + windY * 0.35,
-      randomBetween(-2.1, 2.1) + windX * 0.28,
-      windX * 1.2 + randomBetween(-1.45, 1.45),
-    ),
-    restQuaternion,
-    age: 0,
-    floorY: PHOTO_PRINT_FLOOR_Y + layer * PHOTO_PRINT_LAYER_GAP,
-    floorContactAge: null,
-    discarding: false,
-    baseScale,
-    seed,
-    materials: [
-      { material: shadowMaterial, opacity: 0.12 },
-      { material: cardMaterial, opacity: 1 },
-      { material: imageMaterial, opacity: 0.98 },
-    ],
-  });
-  stageElement!.dataset.photoPrintCount = String(photoPrintParticles.length);
-}
-
-function updatePhotoPrintParticles(delta: number) {
-  if (!isPhotoPrintTheme()) {
-    return;
-  }
-
-  if (photoPrintParticles.length === 0) {
-    return;
-  }
-
-  const hasProtectedDressArea = getVisibleDressScreenBounds(photoPrintDressScreenBounds);
-
-  for (let index = photoPrintParticles.length - 1; index >= 0; index -= 1) {
-    // Iterate backward because removing an item splices the array. Forward
-    // iteration would skip the next particle after a removal.
-    const particle = photoPrintParticles[index];
-    particle.age += delta;
-
-    const floorSettled = particle.floorContactAge !== null;
-    if (particle.discarding) {
-      // Semi-implicit Euler integration: update velocity from gravity, then
-      // update position from the new velocity.
-      particle.velocity.y -= PHOTO_PRINT_GRAVITY * delta;
-      particle.root.position.addScaledVector(particle.velocity, delta);
-      particle.root.rotation.x += particle.angularVelocity.x * delta;
-      particle.root.rotation.y += particle.angularVelocity.y * delta;
-      particle.root.rotation.z += particle.angularVelocity.z * delta;
-    } else {
-      particle.velocity.x += (
-        pointerWind.wind.x * (floorSettled ? 0.035 : 0.26)
-        + Math.sin(shaderTime * 4.8 + particle.seed) * (floorSettled ? 0.012 : 0.07)
-      ) * delta;
-      particle.velocity.z += (
-        pointerWind.wind.z * (floorSettled ? 0.02 : 0.18)
-        + Math.cos(shaderTime * 3.9 + particle.seed) * (floorSettled ? 0.006 : 0.035)
-      ) * delta;
-
-      if (!floorSettled || particle.velocity.y > 0) {
-        particle.velocity.y += (pointerWind.wind.y * 0.08 - PHOTO_PRINT_GRAVITY) * delta;
-      }
-
-      particle.root.position.addScaledVector(particle.velocity, delta);
-
-      if (particle.root.position.y <= particle.floorY) {
-        // Resolve collision against an invisible horizontal coordinate: prevent
-        // penetration and cancel only the downward component.
-        particle.root.position.y = particle.floorY;
-        if (particle.floorContactAge === null) {
-          particle.floorContactAge = 0;
-        }
-        if (particle.velocity.y < 0) {
-          particle.velocity.y = 0;
-        }
-      }
-
-      if (particle.floorContactAge !== null) {
-        particle.floorContactAge += delta;
-        const floorFriction = Math.exp(-delta * 5.8);
-        particle.velocity.x *= floorFriction;
-        particle.velocity.z *= floorFriction;
-        particle.velocity.y = 0;
-        particle.root.position.y = particle.floorY;
-        particle.angularVelocity.multiplyScalar(Math.exp(-delta * 4.8));
-        // Spherical linear interpolation takes the shortest smooth path between
-        // orientations. Exponential t keeps settling speed frame-rate neutral.
-        particle.root.quaternion.slerp(particle.restQuaternion, 1 - Math.exp(-delta * 7.2));
-      } else {
-        particle.velocity.multiplyScalar(Math.exp(-delta * 0.08));
-        particle.root.rotation.x += particle.angularVelocity.x * delta;
-        particle.root.rotation.y += particle.angularVelocity.y * delta;
-        particle.root.rotation.z += particle.angularVelocity.z * delta;
-      }
-    }
-
-    const fadeIn = clamp01(particle.age / 0.16);
-    const opacity = fadeIn;
-    particle.root.scale.setScalar(particle.baseScale * (0.84 + fadeIn * 0.16));
-
-    particle.materials.forEach(({ material, opacity: baseOpacity }) => {
-      material.opacity = opacity * baseOpacity;
-    });
-
-    const overlapsDress = hasProtectedDressArea
-      && doesPhotoPrintOverlapScreenBounds(particle.root, photoPrintDressScreenBounds);
-
-    if (overlapsDress && !particle.discarding) {
-      // "Do not obscure the garment" is an editorial screen-space rule. Convert
-      // an offending print into a disposable falling particle.
-      const outwardDirection = particle.root.position.x >= 0 ? 1 : -1;
-      particle.discarding = true;
-      particle.floorContactAge = null;
-      particle.velocity.set(
-        outwardDirection * randomBetween(0.48, 0.82),
-        randomBetween(-0.82, -0.56),
-        randomBetween(-0.08, 0.12),
-      );
-      particle.angularVelocity.set(
-        randomBetween(-1.8, 1.8),
-        randomBetween(-1.4, 1.4),
-        outwardDirection * randomBetween(0.8, 1.8),
-      );
-    }
-
-    particle.root.visible = !overlapsDress;
-
-    if (particle.discarding) {
-      photoPrintProjectionPoint.copy(particle.root.position).project(camera);
-      const outsideViewport = (
-        Math.abs(photoPrintProjectionPoint.x) > 1.4
-        || photoPrintProjectionPoint.y < -1.35
-      );
-      if (particle.root.position.y < PHOTO_PRINT_DISCARD_Y || outsideViewport) {
-        removePhotoPrintParticle(index);
-      }
-    }
-  }
-  stageElement!.dataset.photoPrintVisible = String(
-    photoPrintParticles.filter((particle) => particle.root.visible).length,
-  );
-  stageElement!.dataset.photoPrintSettled = String(
-    photoPrintParticles.filter((particle) => particle.floorContactAge !== null).length,
-  );
-  stageElement!.dataset.photoPrintDiscarding = String(
-    photoPrintParticles.filter((particle) => particle.discarding).length,
-  );
-}
-
-function resetScreenSpaceBounds(bounds: ScreenSpaceBounds) {
-  bounds.minX = Number.POSITIVE_INFINITY;
-  bounds.maxX = Number.NEGATIVE_INFINITY;
-  bounds.minY = Number.POSITIVE_INFINITY;
-  bounds.maxY = Number.NEGATIVE_INFINITY;
-}
-
-function expandScreenSpaceBounds(bounds: ScreenSpaceBounds, point: THREE.Vector3) {
-  bounds.minX = Math.min(bounds.minX, point.x);
-  bounds.maxX = Math.max(bounds.maxX, point.x);
-  bounds.minY = Math.min(bounds.minY, point.y);
-  bounds.maxY = Math.max(bounds.maxY, point.y);
-}
-
-function getVisibleDressScreenBounds(target: ScreenSpaceBounds) {
-  // This collision is intentionally screen-space, not physical world-space:
-  // two separated 3D objects can still overlap in the final camera view.
-  resetScreenSpaceBounds(target);
-  camera.updateMatrixWorld();
-  let hasBounds = false;
-
-  for (const record of fullDressCache.values()) {
-    if (!record.pivot.visible) {
-      continue;
-    }
-
-    // Box3 is a world-space axis-aligned bounding box. Projecting its eight
-    // corners produces a conservative 2D rectangle around the dress.
-    photoPrintDressWorldBounds.setFromObject(record.loaded.dress);
-    if (photoPrintDressWorldBounds.isEmpty()) {
-      continue;
-    }
-
-    const { min, max } = photoPrintDressWorldBounds;
-    for (let corner = 0; corner < 8; corner += 1) {
-      photoPrintProjectionPoint
-        .set(
-          corner & 1 ? max.x : min.x,
-          corner & 2 ? max.y : min.y,
-          corner & 4 ? max.z : min.z,
-        )
-        .project(camera);
-      if (Number.isFinite(photoPrintProjectionPoint.x) && Number.isFinite(photoPrintProjectionPoint.y)) {
-        expandScreenSpaceBounds(target, photoPrintProjectionPoint);
-        hasBounds = true;
-      }
-    }
-  }
-
-  return hasBounds;
-}
-
-function doesPhotoPrintOverlapScreenBounds(root: THREE.Group, dressBounds: ScreenSpaceBounds) {
-  // Transform the card's four local corners through its complete world matrix,
-  // project them through the camera, then perform a rectangle overlap test.
-  resetScreenSpaceBounds(photoPrintCardScreenBounds);
-  root.updateMatrixWorld(true);
-
-  for (let corner = 0; corner < 4; corner += 1) {
-    photoPrintProjectionPoint
-      .set(
-        corner & 1 ? PHOTO_PRINT_CARD_WIDTH * 0.5 : PHOTO_PRINT_CARD_WIDTH * -0.5,
-        corner & 2 ? PHOTO_PRINT_CARD_HEIGHT * 0.5 : PHOTO_PRINT_CARD_HEIGHT * -0.5,
-        0,
-      )
-      .applyMatrix4(root.matrixWorld)
-      .project(camera);
-    expandScreenSpaceBounds(photoPrintCardScreenBounds, photoPrintProjectionPoint);
-  }
-
-  return (
-    photoPrintCardScreenBounds.maxX >= dressBounds.minX - PHOTO_PRINT_DRESS_CLEARANCE_NDC
-    && photoPrintCardScreenBounds.minX <= dressBounds.maxX + PHOTO_PRINT_DRESS_CLEARANCE_NDC
-    && photoPrintCardScreenBounds.maxY >= dressBounds.minY - PHOTO_PRINT_DRESS_CLEARANCE_NDC
-    && photoPrintCardScreenBounds.minY <= dressBounds.maxY + PHOTO_PRINT_DRESS_CLEARANCE_NDC
-  );
-}
-
-function removePhotoPrintParticle(index: number) {
-  const [particle] = photoPrintParticles.splice(index, 1);
-  if (!particle) {
-    return;
-  }
-
-  if (particle.root.parent) {
-    particle.root.parent.remove(particle.root);
-  }
-  // Removing from the scene does not free GPU memory. Per-particle materials
-  // must be disposed explicitly; geometry is shared and remains alive.
-  particle.materials.forEach(({ material }) => material.dispose());
-  stageElement!.dataset.photoPrintCount = String(photoPrintParticles.length);
-}
-
-function clearPhotoPrintParticles() {
-  for (let index = photoPrintParticles.length - 1; index >= 0; index -= 1) {
-    removePhotoPrintParticle(index);
-  }
-  photoPrintLayerCounter = 0;
-  lastPhotoPrintBurstTime = Number.NEGATIVE_INFINITY;
-  lastPhotoPrintBurstPoint.set(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
-  stageElement!.dataset.photoPrintSettled = '0';
-  stageElement!.dataset.photoPrintDiscarding = '0';
-}
-
-function isPhotoPrintTheme() {
-  return cycloramaBackgroundSettings.preset === 'tabla-rasa';
-}
-
-function randomBetween(min: number, max: number) {
-  return min + Math.random() * (max - min);
-}
-
-function createHoloMarbleMaterial() {
-  const material = trackMaterial(
-    new THREE.MeshPhysicalMaterial({
-      color: 0xf7efe2,
-      map: createHoloMarbleTexture(),
-      roughness: 0.2,
-      metalness: 0,
-      clearcoat: 0.85,
-      clearcoatRoughness: 0.08,
-      envMapIntensity: 1.25,
-    }),
-  );
-
-  material.iridescence = 0.18;
-  material.iridescenceIOR = 1.45;
-  material.iridescenceThicknessRange = [180, 620];
-  return rememberHoloPaletteMaterial(material, 0xf7efe2, 1);
-}
-
-function createCandyGlossMaterial(color: number, opacity: number) {
-  const material = trackMaterial(
-    new THREE.MeshPhysicalMaterial({
-      color,
-      roughness: 0.06,
-      metalness: 0,
-      transparent: true,
-      opacity,
-      depthWrite: false,
-      clearcoat: 1,
-      clearcoatRoughness: 0.018,
-      envMapIntensity: 1.9,
-      side: THREE.DoubleSide,
-    }),
-  );
-
-  material.transmission = 0.16;
-  material.thickness = 0.42;
-  material.iridescence = 0.55;
-  material.iridescenceIOR = 1.8;
-  material.iridescenceThicknessRange = [220, 820];
-  return rememberHoloPaletteMaterial(material, color, opacity);
-}
-
-function createIvoryMarbleMaterial() {
-  const material = trackMaterial(
-    new THREE.MeshPhysicalMaterial({
-      color: 0xeee5d7,
-      map: createIvoryMarbleTexture(),
-      roughness: 0.26,
-      metalness: 0,
-      clearcoat: 0.48,
-      clearcoatRoughness: 0.12,
-      envMapIntensity: 1.12,
-    }),
-  );
-
-  material.iridescence = 0.08;
-  material.iridescenceIOR = 1.35;
-  material.iridescenceThicknessRange = [160, 420];
-  return material;
-}
-
-function createIvoryGlossMaterial(color: number, opacity: number) {
-  const material = trackMaterial(
-    new THREE.MeshPhysicalMaterial({
-      color,
-      roughness: 0.04,
-      metalness: 0,
-      transparent: opacity < 1,
-      opacity,
-      depthWrite: opacity >= 0.84,
-      clearcoat: 1,
-      clearcoatRoughness: 0.02,
-      envMapIntensity: 1.45,
-      side: THREE.DoubleSide,
-    }),
-  );
-
-  material.transmission = opacity < 0.75 ? 0.1 : 0;
-  material.thickness = 0.28;
-  material.iridescence = 0.1;
-  material.iridescenceIOR = 1.42;
-  material.iridescenceThicknessRange = [140, 420];
-  return material;
-}
-
-function createHoloMarbleTexture() {
-  const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 512;
-  const context = canvas.getContext('2d');
-
-  if (!context) {
-    return null;
-  }
-
-  const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height);
-  gradient.addColorStop(0, '#fffaf0');
-  gradient.addColorStop(0.48, '#d9eef0');
-  gradient.addColorStop(1, '#fff1d6');
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, canvas.width, canvas.height);
-
-  for (let index = 0; index < 86; index += 1) {
-    const y = (index / 86) * canvas.height + Math.sin(index * 2.13) * 24;
-    const alpha = 0.035 + (index % 5) * 0.006;
-    context.strokeStyle = index % 3 === 0
-      ? `rgba(255, 64, 183, ${alpha})`
-      : `rgba(72, 108, 120, ${alpha})`;
-    context.lineWidth = 1 + (index % 4) * 0.7;
-    context.beginPath();
-    context.moveTo(-80, y);
-    context.bezierCurveTo(
-      120,
-      y + Math.sin(index) * 70,
-      330,
-      y - Math.cos(index * 1.7) * 85,
-      canvas.width + 90,
-      y + Math.sin(index * 0.8) * 42,
-    );
-    context.stroke();
-  }
-
-  const texture = trackTexture(new THREE.CanvasTexture(canvas));
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(1.5, 1.5);
-  texture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
-
-  return texture;
-}
-
-function createIvoryMarbleTexture() {
-  const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 512;
-  const context = canvas.getContext('2d');
-
-  if (!context) {
-    return null;
-  }
-
-  const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height);
-  gradient.addColorStop(0, '#fffdf7');
-  gradient.addColorStop(0.5, '#ebe5da');
-  gradient.addColorStop(1, '#d5ccbd');
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, canvas.width, canvas.height);
-
-  for (let index = 0; index < 96; index += 1) {
-    const y = (index / 96) * canvas.height + Math.sin(index * 1.83) * 20;
-    const alpha = 0.025 + (index % 6) * 0.004;
-    context.strokeStyle = index % 4 === 0
-      ? `rgba(255, 255, 252, ${alpha + 0.035})`
-      : `rgba(96, 84, 72, ${alpha + 0.012})`;
-    context.lineWidth = 0.8 + (index % 3) * 0.7;
-    context.beginPath();
-    context.moveTo(-60, y);
-    context.bezierCurveTo(
-      115,
-      y + Math.sin(index * 0.7) * 48,
-      340,
-      y - Math.cos(index * 1.45) * 54,
-      canvas.width + 70,
-      y + Math.sin(index * 0.5) * 34,
-    );
-    context.stroke();
-  }
-
-  const texture = trackTexture(new THREE.CanvasTexture(canvas));
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(1.35, 1.35);
-  texture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
-
-  return texture;
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4401,7 +2214,7 @@ function applyCycloramaBackgroundPreset(presetId: CycloramaBackgroundPresetId) {
 
   if (holoAccentGroup) {
     holoAccentGroup.visible = presetId === 'mew-holo';
-    applyHoloAccentPalette(presetId);
+    holoSculptureSystem?.applyPalette(presetId);
   }
 
   if (photoPrintGroup) {
@@ -4463,7 +2276,7 @@ function applyCycloramaBackgroundPreset(presetId: CycloramaBackgroundPresetId) {
   queueCanvasResize();
   updateThemeObjectVisibility();
   updateInfiniteBackdropScale();
-  scheduleGhostDressLoads();
+  ghostDressSystem?.schedule();
   renderDressThumbnails();
   updateCycloramaBackgroundButtons();
   signalDiptych.build();
@@ -4546,8 +2359,8 @@ function updateThemeObjectVisibility() {
     signalBlackGroup.visible = signalBlack;
   }
 
-  fullDressCache.forEach((record) => {
-    if (record === activeFullDress && record.targetOpacity > 0) {
+  fullDressStore.records.forEach((record) => {
+    if (record === fullDressStore.active && record.targetOpacity > 0) {
       record.pivot.visible = true;
     }
   });
@@ -4630,7 +2443,7 @@ function updateCycloramaBackgroundUrl(presetId: CycloramaBackgroundPresetId) {
 
 function handleDressAssetClick(event: MouseEvent) {
   const assetId = (event.currentTarget as HTMLButtonElement).dataset.dressAsset;
-  const activeAssetId = activeFullDress?.asset.id;
+  const activeAssetId = fullDressStore.active?.asset.id;
 
   if (isDressAssetId(assetId) && assetId !== activeAssetId) {
     void loadDressAsset(assetId);
@@ -4678,7 +2491,7 @@ function handleDressNavigationClick(event: MouseEvent) {
     return;
   }
 
-  const activeId = activeFullDress?.asset.id ?? dressAssetSettings.asset;
+  const activeId = fullDressStore.active?.asset.id ?? dressAssetSettings.asset;
   const activeIndex = Math.max(0, DRESS_ASSET_ORDER.indexOf(activeId));
   const offset = direction > 0 ? 1 : -1;
   const nextIndex = (activeIndex + offset + DRESS_ASSET_ORDER.length) % DRESS_ASSET_ORDER.length;
@@ -4860,7 +2673,7 @@ function resize() {
   // matrix. Changing aspect without a projection update distorts the view.
   applyResponsiveCamera(width, height);
   updateInfiniteBackdropScale();
-  scheduleGhostDressLoads();
+  ghostDressSystem?.schedule();
   renderDressThumbnails();
   bokehUniforms.aspect.value = camera.aspect;
 
@@ -5006,7 +2819,7 @@ function applyThemeSubjectPlacement() {
   const dialectic = cycloramaBackgroundSettings.preset === 'blue';
   const lift = invisibleCities ? (isMobileViewport() ? 0 : 0.42) : 0;
 
-  fullDressCache.forEach((record) => {
+  fullDressStore.records.forEach((record) => {
     // The GLB loader already normalizes source dimensions. This final scale is
     // theme composition, and `dialecticScale` compensates for perceived
     // silhouette differences. Both current dresses use 1 in Dialectic.
@@ -5022,33 +2835,7 @@ function applyThemeSubjectPlacement() {
   });
 }
 
-function applySafeCameraMotion() {
-  const baseCameraY = subjectMotion.baseCameraPosition.y;
-  const baseFocusY = subjectMotion.baseFocusTarget.y;
-  // Focus→camera is a view-offset vector. Scaling it changes distance without
-  // changing the intended viewing direction.
-  const baseViewOffset = subjectMotion.baseCameraPosition.clone().sub(subjectMotion.baseFocusTarget);
-  const backAmount = getBackViewAmount(subjectMotion.yaw);
-  const distanceMultiplier = THREE.MathUtils.lerp(1, CAMERA_BACK_DISTANCE_MULTIPLIER, backAmount);
-  const scaledViewOffset = baseViewOffset.multiplyScalar(distanceMultiplier);
 
-  camera.position.copy(subjectMotion.baseFocusTarget).add(scaledViewOffset);
-  camera.position.y = THREE.MathUtils.clamp(
-    baseCameraY + subjectMotion.cameraLift,
-    baseCameraY - CAMERA_MAX_LIFT,
-    baseCameraY + CAMERA_MAX_LIFT,
-  );
-
-  focusTarget.copy(subjectMotion.baseFocusTarget);
-  focusTarget.y = THREE.MathUtils.clamp(
-    baseFocusY + subjectMotion.cameraLift * 0.12,
-    baseFocusY - FOCUS_MAX_LIFT,
-    baseFocusY + FOCUS_MAX_LIFT,
-  );
-  controls.target.copy(focusTarget);
-  // OrbitControls writes the camera orientation that looks toward this target.
-  controls.update();
-}
 
 function updateDebugState(bounds?: THREE.Box3) {
   (window as typeof window & {
@@ -5056,14 +2843,12 @@ function updateDebugState(bounds?: THREE.Box3) {
   }).__boosterDebug = {
     cameraPosition: camera.position.toArray(),
     focusTarget: focusTarget.toArray(),
-    activeDress: activeFullDress?.asset.id ?? null,
-    fullDressCache: Array.from(fullDressCache.keys()),
+    activeDress: fullDressStore.active?.asset.id ?? null,
+    fullDressCache: Array.from(fullDressStore.records.keys()),
     backgroundPreset: cycloramaBackgroundSettings.preset,
-    photoPrintCount: photoPrintParticles.length,
-    visibleGhosts: Array.from(ghostDressCache.values())
-      .filter((record) => record.root.visible)
-      .map((record) => record.asset.id),
-    subjectScale: activeFullDress?.pivot.scale.x ?? null,
+    photoPrintCount: (photoPrintSystem?.count ?? 0),
+    visibleGhosts: ghostDressSystem?.visibleAssetIds ?? [],
+    subjectScale: fullDressStore.active?.pivot.scale.x ?? null,
     subjectYaw: subjectMotion.yaw,
     subjectChildren: subjectMotion.pivot?.children.map((child) => child.name || child.type) ?? [],
     sceneChildren: scene.children.map((child) => child.name || child.type),
@@ -5077,10 +2862,7 @@ function updateDebugState(bounds?: THREE.Box3) {
   };
 }
 
-function getBackViewAmount(yaw: number) {
-  const backFacing = (1 - Math.cos(yaw)) * 0.5;
-  return THREE.MathUtils.smoothstep(backFacing, 0.04, 1);
-}
+
 
 syncDressMaterialEffectUniforms();
 resize();
@@ -5130,10 +2912,6 @@ function dispose() {
   // paths are prevented from operating on released objects.
   disposed = true;
   window.cancelAnimationFrame(animationFrame);
-  if (ghostLoadTimeout) {
-    window.clearTimeout(ghostLoadTimeout);
-    ghostLoadTimeout = 0;
-  }
   if (editorialRailRevealTimeout) {
     window.clearTimeout(editorialRailRevealTimeout);
     editorialRailRevealTimeout = 0;
@@ -5172,14 +2950,10 @@ function dispose() {
   experienceControls.destroy();
   armBloomController?.dispose();
   windController?.dispose();
-  clearPhotoPrintParticles();
-  fullDressCache.forEach((record) => disposeObjectResources(record.pivot));
-  fullDressCache.clear();
-  ghostDressCache.forEach((record) => disposeGhostDressRecord(record));
-  ghostDressCache.clear();
-  dressThumbnailRecords.forEach((record) => disposeDressThumbnailRecord(record));
-  dressThumbnailRecords.clear();
-  ghostPickTargets.length = 0;
+  photoPrintSystem?.dispose();
+  fullDressStore.dispose();
+  ghostDressSystem?.dispose();
+  dressThumbnailRenderer.dispose();
   controls.dispose();
   composer.dispose();
   disposeSubjectTransitionPipeline();

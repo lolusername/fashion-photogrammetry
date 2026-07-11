@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-import type { DressThumbnailRecord, GhostDressRecord } from '../app/experienceTypes';
+import type { GhostDressRecord } from '../app/experienceTypes';
 
 type MaterialFadeState = {
   opacity: number;
@@ -83,30 +83,6 @@ export function disposeGhostDressRecord(record: GhostDressRecord) {
   record.material.dispose();
   record.fillMaterial.dispose();
   record.wireMaterial.dispose();
-}
-
-export function disposeDressThumbnailRecord(record: DressThumbnailRecord) {
-  if (record.root) {
-    const materials = new Set<THREE.Material>();
-
-    record.root.traverse((object) => {
-      const owner = object as THREE.Object3D & {
-        material?: THREE.Material | THREE.Material[];
-      };
-      if (!owner.material) {
-        return;
-      }
-
-      const objectMaterials = Array.isArray(owner.material) ? owner.material : [owner.material];
-      objectMaterials.forEach((material) => materials.add(material));
-    });
-
-    materials.forEach((material) => material.dispose());
-    record.scene.remove(record.root);
-    record.root = null;
-  }
-
-  record.renderer.dispose();
 }
 
 export function disposeObjectResources(
