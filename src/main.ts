@@ -16,7 +16,6 @@ import {
   PUBLIC_THEMES,
   isPublicThemeId,
   type CycloramaBackgroundPresetId,
-  type CycloramaTextureMode,
   type PublicThemeId,
 } from './config/themes';
 import {
@@ -37,6 +36,128 @@ import {
   createDressWindController,
   syncDressMaterialGrain,
 } from './shaders/dressWindMaterial';
+import type {
+  ArmBloomController,
+  BlueDressHoverState,
+  CycloramaBackgroundSettings,
+  CycloramaBackgroundUniforms,
+  DressThumbnailRecord,
+  FullDressRecord,
+  GhostDressRecord,
+  HoloSculptureMotion,
+  InfiniteBackdropUniforms,
+  MewForegroundPipeline,
+  MewHoloScrollState,
+  PaletteMaterial,
+  PhotoPrintParticle,
+  PointerWindState,
+  ScreenSpaceBounds,
+  SubjectBloomPipeline,
+  SubjectMotionState,
+  SubjectTransitionPipeline,
+} from './app/experienceTypes';
+import {
+  ARMS_GLOW_SCALE,
+  BLOOM_BASE_RADIUS,
+  BLOOM_BASE_STRENGTH,
+  BLOOM_THRESHOLD,
+  BLOOM_WIND_RADIUS,
+  BLOOM_WIND_STRENGTH,
+  BLUE_DRESS_HOVER_IDLE_SECONDS,
+  BLUE_DRESS_HOVER_TURN_RESPONSE,
+  BLUE_DRESS_HOVER_YAW_LIMIT,
+  BLUE_DRESS_RETURN_EASE,
+  BLUE_DRESS_ROTATION_EASE,
+  CAMERA_BACK_DISTANCE_MULTIPLIER,
+  CAMERA_MAX_LIFT,
+  CAMERA_VERTICAL_EASE,
+  CAMERA_VERTICAL_RESPONSE,
+  CYCLO_BACK_Z,
+  CYCLO_TEXTURE_FALLBACK_ASPECT,
+  CYCLO_TEXTURE_MODE_VALUES,
+  CYCLO_TEXTURE_REPEAT_X,
+  CYCLO_WALL_HEIGHT,
+  CYCLO_WIDTH,
+  DRESS_BLOOM_MAX_STRENGTH,
+  DRESS_BLOOM_RADIUS,
+  DRESS_BLOOM_THRESHOLD,
+  DRESS_MATERIAL_GRAIN_STRENGTH,
+  DRESS_THUMBNAIL_TARGET_HEIGHT,
+  DRESS_THUMBNAIL_TARGET_WIDTH,
+  DRESS_TRANSITION_FX_DURATION,
+  DRESS_TRANSITION_FX_ENABLED,
+  DRESS_TRANSITION_FX_OVERLAY_OPACITY,
+  FOCUS_MAX_LIFT,
+  FULL_DRESS_CACHE_LIMIT,
+  FULL_DRESS_FADE_SPEED,
+  GHOST_EDGE_THRESHOLD_DEGREES,
+  GHOST_LOAD_DELAY_MS,
+  INFINITE_BACKDROP_MODE_VALUES,
+  INVISIBLE_CITIES_SUBJECT_SCALE,
+  LOADING_OVERLAY_FADE_MS,
+  MEW_SCROLL_ROTATION_EASE,
+  MEW_SCROLL_TRIGGER_PROGRESS,
+  MEW_SCROLL_VIEWPORT_FACTOR,
+  MOBILE_GHOST_LIMIT,
+  PHOTO_PRINT_BURST_INTERVAL,
+  PHOTO_PRINT_CARD_HEIGHT,
+  PHOTO_PRINT_CARD_WIDTH,
+  PHOTO_PRINT_DISCARD_Y,
+  PHOTO_PRINT_DRESS_CLEARANCE_NDC,
+  PHOTO_PRINT_FLOOR_Y,
+  PHOTO_PRINT_GRAVITY,
+  PHOTO_PRINT_IMAGE_HEIGHT,
+  PHOTO_PRINT_IMAGE_URLS,
+  PHOTO_PRINT_IMAGE_WIDTH,
+  PHOTO_PRINT_LAYER_GAP,
+  PHOTO_PRINT_MIN_POINTER_DISTANCE,
+  PHOTO_PRINT_SPAWN_Z,
+  PHOTO_PRINT_SURFACE_TILT,
+  SUBJECT_YAW_EASE,
+  SUBJECT_YAW_RANGE,
+  SUBJECT_YAW_RESPONSE,
+  SUBJECT_YAW_WIND_DRIFT,
+  TABLA_RASA_ACCENT_COLORS,
+  TARGET_RENDER_INTERVAL_MS,
+  TECHNICOLOR_YELLOW,
+  WIND_ARCHIVE_SUBJECT_SCALE,
+} from './app/experienceConstants';
+import {
+  getEffectPixelRatio,
+  getRenderPixelRatio,
+  usesMobileRenderProfile,
+  usesSingleContextMewLayout,
+} from './app/renderProfile';
+import {
+  cinematicSettings,
+  ivoryBackgroundOpticsSettings,
+} from './rendering/postProcessingSettings';
+import {
+  CINEMATIC_FINISH_SHADER,
+  IVORY_BACKGROUND_OPTICS_SHADER,
+  MEW_ALPHA_FEATHER_SHADER,
+} from './rendering/shaders/postProcessing';
+import { createMewTitleOverlay } from './rendering/mewTitleOverlay';
+import {
+  ResourceTracker,
+  collectMaterialTextures,
+  disposeDressThumbnailRecord,
+  disposeGhostDressRecord,
+  disposeObjectResources,
+  setObjectOpacity,
+} from './rendering/resourceTracker';
+import { createInfiniteBackdropMaterial } from './rendering/materials/infiniteBackdropMaterial';
+import {
+  createCycloramaGeometry,
+  createDialecticHalftoneShadowMaterial,
+  createSoftContactShadowMaterial,
+  createTechnicolorYellowPlaneMaterial,
+  getCoveredCycloramaTransform,
+  getCycloramaRepeatY,
+} from './rendering/cyclorama';
+import { patchCycloramaBackgroundMaterial } from './rendering/materials/cycloramaMaterial';
+import { renderIvoryPortal } from './ui/ivoryPortal';
+import { SignalDiptych } from './ui/signalDiptych';
 
 /**
  * ============================================================================
@@ -185,213 +306,6 @@ import {
  */
 
 // ---------------------------------------------------------------------------
-// APPLICATION STATE TYPES
-// ---------------------------------------------------------------------------
-// These types describe mutable runtime state. They contain no behavior by
-// themselves; they make relationships explicit and let TypeScript catch
-// accidental use of the wrong coordinate/value kind.
-
-type PointerWindState = {
-  // Pointer positions are normalized to 0..1 so interaction remains consistent
-  // when the canvas changes size.
-  previous: THREE.Vector2;
-  gustCenter: THREE.Vector2;
-  // `targetWind` changes immediately from input. `wind` eases toward it. This
-  // two-value pattern prevents pointer events from producing visual snapping.
-  targetWind: THREE.Vector3;
-  wind: THREE.Vector3;
-  hasPointer: boolean;
-  activity: number;
-  speed: number;
-  lastMoveTime: number;
-  lastSampleTime: number;
-};
-
-type ArmBloomController = {
-  update: (activity: number) => void;
-  dispose: () => void;
-};
-
-type PaletteMaterial = THREE.Material & {
-  color?: THREE.Color;
-  roughness?: number;
-  clearcoat?: number;
-  clearcoatRoughness?: number;
-  envMapIntensity?: number;
-  iridescence?: number;
-};
-
-type BlueDressHoverState = {
-  overActiveDress: boolean;
-  lastMoveTime: number;
-};
-
-type MewHoloScrollState = {
-  progress: number;
-  targetProgress: number;
-  switching: boolean;
-  touchY: number | null;
-};
-
-type SubjectMotionState = {
-  // A Group is used as a transform pivot around the imported dress. Keeping a
-  // nullable reference allows the app to boot before the asynchronous GLB load
-  // completes.
-  pivot: THREE.Group | null;
-  // Angles are radians. One complete turn is 2π, not 360.
-  yaw: number;
-  targetYaw: number;
-  cameraLift: number;
-  targetCameraLift: number;
-  baseCameraPosition: THREE.Vector3;
-  baseFocusTarget: THREE.Vector3;
-};
-
-type SubjectBloomPipeline = {
-  // Selective bloom needs its own renderer/composer/output texture and a second
-  // tiny scene containing a full-screen plane that composites the result.
-  renderer: THREE.WebGLRenderer;
-  composer: EffectComposer;
-  bloomPass: UnrealBloomPass;
-  overlayScene: THREE.Scene;
-  overlayCamera: THREE.OrthographicCamera;
-  overlayGeometry: THREE.PlaneGeometry;
-  overlayMaterial: THREE.ShaderMaterial;
-};
-
-type SubjectTransitionPipeline = {
-  renderTarget: THREE.WebGLRenderTarget;
-  composer: EffectComposer;
-  renderPass: RenderPass;
-  glitchPass: GlitchPass;
-  overlayScene: THREE.Scene;
-  overlayCamera: THREE.OrthographicCamera;
-  overlayGeometry: THREE.PlaneGeometry;
-  overlayMaterial: THREE.MeshBasicMaterial;
-};
-
-type MewForegroundPipeline = {
-  renderer: THREE.WebGLRenderer;
-  pmrem: THREE.PMREMGenerator;
-  environment: THREE.Texture;
-  subjectBloomPipeline: SubjectBloomPipeline;
-  titleBackgroundComposer: EffectComposer;
-  titleBackgroundBloomPass: UnrealBloomPass;
-  titleBackgroundBokehPass: BokehPass;
-  titleBackgroundBokehUniforms: Record<string, THREE.IUniform<number>>;
-  titleBackgroundCinematicFinishPass: ShaderPass;
-  titleBackgroundAlphaFeatherPass: ShaderPass;
-};
-
-type CycloramaBackgroundSettings = {
-  preset: CycloramaBackgroundPresetId;
-};
-
-type CycloramaBackgroundUniforms = {
-  // `THREE.IUniform<T>` is an object with a mutable `.value`. Three.js keeps the
-  // object identity while uploading its current value to the GPU each frame.
-  uCycloTextureMode: THREE.IUniform<number>;
-  uCycloTileRepeat: THREE.IUniform<THREE.Vector2>;
-  uCycloCoverScale: THREE.IUniform<THREE.Vector2>;
-  uCycloCoverOffset: THREE.IUniform<THREE.Vector2>;
-  uCycloTime: THREE.IUniform<number>;
-};
-
-type InfiniteBackdropUniforms = {
-  uBackdropMode: THREE.IUniform<number>;
-  uBackdropTime: THREE.IUniform<number>;
-  uBackdropAspect: THREE.IUniform<number>;
-  uGraphicTexture: THREE.IUniform<THREE.Texture | null>;
-  uGraphicVerticalTexture: THREE.IUniform<THREE.Texture | null>;
-  uHeroStillTexture: THREE.IUniform<THREE.Texture | null>;
-  uGraphicAspect: THREE.IUniform<number>;
-  uGraphicVerticalAspect: THREE.IUniform<number>;
-  uHeroStillAspect: THREE.IUniform<number>;
-};
-
-type HoloSculptureMotion = {
-  root: THREE.Object3D;
-  basePosition: THREE.Vector3;
-  baseRotation: THREE.Euler;
-  windOffset: THREE.Vector3;
-  windVelocity: THREE.Vector3;
-  angularOffset: THREE.Vector3;
-  angularVelocity: THREE.Vector3;
-  floatAmplitude: number;
-  floatSpeed: number;
-  phase: number;
-  spin: THREE.Vector3;
-  windScale: number;
-};
-
-type PhotoPrintMaterialRecord = {
-  material: THREE.MeshBasicMaterial;
-  opacity: number;
-};
-
-type ScreenSpaceBounds = {
-  minX: number;
-  maxX: number;
-  minY: number;
-  maxY: number;
-};
-
-type PhotoPrintParticle = {
-  // `root` owns the shadow, white print paper, and image meshes so one transform
-  // can move/rotate/scale the entire print.
-  root: THREE.Group;
-  // Linear velocity is world-units/second. Angular velocity is radians/second.
-  velocity: THREE.Vector3;
-  angularVelocity: THREE.Vector3;
-  restQuaternion: THREE.Quaternion;
-  age: number;
-  floorY: number;
-  // null = airborne. A number = seconds since first touching the floor.
-  floorContactAge: number | null;
-  // Prints that would cross the dress are released downward and removed once
-  // offscreen instead of being allowed to obscure the garment.
-  discarding: boolean;
-  baseScale: number;
-  seed: number;
-  materials: PhotoPrintMaterialRecord[];
-};
-
-type FullDressRecord = {
-  // The immutable catalog entry (`asset`) is kept beside the loaded Three.js
-  // objects and crossfade/cache metadata that belong to that entry.
-  asset: DressAsset;
-  loaded: LoadedDress;
-  pivot: THREE.Group;
-  opacity: number;
-  targetOpacity: number;
-  lastUsed: number;
-};
-
-type GhostDressRecord = {
-  asset: DressAsset;
-  root: THREE.Group;
-  material: THREE.LineBasicMaterial;
-  fillMaterial: THREE.MeshBasicMaterial;
-  wireMaterial: THREE.MeshBasicMaterial;
-  pickTargets: THREE.Object3D[];
-};
-
-type DressThumbnailRecord = {
-  assetId: DressAssetId;
-  canvas: HTMLCanvasElement;
-  renderer: THREE.WebGLRenderer;
-  scene: THREE.Scene;
-  camera: THREE.PerspectiveCamera;
-  root: THREE.Group | null;
-};
-
-type SignalGraphNodeRecord = {
-  assetId: DressAssetId;
-  canvas: HTMLCanvasElement;
-  renderer: THREE.WebGLRenderer;
-};
-
-// ---------------------------------------------------------------------------
 // INITIAL URL STATE AND UI CONSTRUCTION
 // ---------------------------------------------------------------------------
 // The URL is treated as shareable application state. Reading it before building
@@ -399,21 +313,6 @@ type SignalGraphNodeRecord = {
 const initialExperienceState = readInitialExperienceState(window.location.search);
 const CYCLO_BACKGROUND_DEFAULT: PublicThemeId = initialExperienceState.themeId;
 const DRESS_ASSET_DEFAULT: DressAssetId = initialExperienceState.dressId;
-const TECHNICOLOR_YELLOW = 0xffff00;
-const CYCLO_TEXTURE_MODE_VALUES: Record<CycloramaTextureMode, number> = {
-  'blue-flat': 0,
-  'mew-holo': 3,
-  'tabla-rasa': 6,
-  'ivory-holo': 4,
-  'signal-black': 5,
-};
-const INFINITE_BACKDROP_MODE_VALUES: Record<CycloramaBackgroundPresetId, number> = {
-  blue: 0,
-  'mew-holo': 1,
-  'tabla-rasa': 3,
-  'ivory-holo': 0,
-  'signal-black': 2,
-};
 const app = document.querySelector<HTMLDivElement>('#app');
 
 if (!app) {
@@ -499,138 +398,12 @@ THREE.ColorManagement.enabled = true;
 // frame-rate independent: a 60 Hz display and a 120 Hz display converge at
 // nearly the same speed in real seconds.
 const settings: DressWindSettings = { ...DRESS_WIND_PRESETS.editorial };
-const BLOOM_BASE_STRENGTH = .02;
-const BLOOM_WIND_STRENGTH = 0.045;
-const BLOOM_BASE_RADIUS = 0.12;
-const BLOOM_WIND_RADIUS = 0.06;
-const BLOOM_THRESHOLD = 0.9;
-// The user-facing 0–100 slider maps into this deliberately narrow strength
-// range. Its default percentage lives in sceneShell.ts beside the input.
-const DRESS_BLOOM_MAX_STRENGTH = 0.12;
-const DRESS_BLOOM_RADIUS = 0.08;
-const DRESS_BLOOM_THRESHOLD = 0.55;
-// Dress transition FX (Blue + Mew Holo only): a bloom burst + glitch applied to
-// the dress/arm figure while it crossfades to another dress. Flip this single
-// flag to false to fully remove the effect (it then never renders).
-const DRESS_TRANSITION_FX_ENABLED = true;
-const DRESS_TRANSITION_FX_DURATION = 0.72;
-const DRESS_TRANSITION_FX_OVERLAY_OPACITY = 0.26;
-const LOADING_OVERLAY_FADE_MS = 420;
-const INVISIBLE_CITIES_SUBJECT_SCALE = 0.9;
-const WIND_ARCHIVE_SUBJECT_SCALE = 0.78;
-const ARMS_GLOW_SCALE = 0.82;
-const SUBJECT_YAW_RESPONSE = 1.0;
-const SUBJECT_YAW_RANGE = Math.PI * 2.05;
-const SUBJECT_YAW_EASE = 2.6;
-const SUBJECT_YAW_WIND_DRIFT = 0.18;
-const CAMERA_VERTICAL_RESPONSE = 0.56;
-const CAMERA_VERTICAL_EASE = 3.6;
-const CAMERA_MAX_LIFT = 0.48;
-const FOCUS_MAX_LIFT = 0.25;
-const CAMERA_BACK_DISTANCE_MULTIPLIER = 1.5;
-const BLUE_DRESS_HOVER_TURN_RESPONSE = 2.15;
-const BLUE_DRESS_HOVER_YAW_LIMIT = Math.PI * 0.45;
-const BLUE_DRESS_HOVER_IDLE_SECONDS = 0.12;
-const BLUE_DRESS_RETURN_EASE = 1.9;
-const BLUE_DRESS_ROTATION_EASE = 2.8;
-const MEW_SCROLL_ROTATION_EASE = 3.8;
-const MEW_SCROLL_TRIGGER_PROGRESS = 0.985;
-const MEW_SCROLL_VIEWPORT_FACTOR = 0.92;
-const PHOTO_PRINT_IMAGE_URLS = [
-  '/editorial/sarmi-web-75.jpg',
-  '/editorial/sarmi-web-76.jpg',
-  '/editorial/sarmi-web-84.jpg',
-  '/editorial/sarmi-web-98.jpg',
-];
-const PHOTO_PRINT_CARD_WIDTH = 0.68;
-const PHOTO_PRINT_CARD_HEIGHT = 0.398;
-const PHOTO_PRINT_IMAGE_WIDTH = 0.644;
-const PHOTO_PRINT_IMAGE_HEIGHT = 0.362;
-// Z is the spawn depth in world space. Y is the landing-plane height.
-const PHOTO_PRINT_SPAWN_Z = 1.22;
-const PHOTO_PRINT_FLOOR_Y = 0.24;
-// PlaneGeometry begins in local XY. Rotating around X tips its local Y axis
-// backward into world Z. This angle is shared by resting photos and the
-// projected archive shadows so they appear to occupy one invisible floor.
-const PHOTO_PRINT_SURFACE_TILT = -1.12;
-const PHOTO_PRINT_GRAVITY = 1.42;
-const PHOTO_PRINT_LAYER_GAP = 0.0008;
-const PHOTO_PRINT_DISCARD_Y = -1.35;
-const PHOTO_PRINT_BURST_INTERVAL = 0.34;
-const PHOTO_PRINT_MIN_POINTER_DISTANCE = 0.085;
-const PHOTO_PRINT_DRESS_CLEARANCE_NDC = 0.012;
-const FULL_DRESS_CACHE_LIMIT = 2;
-const FULL_DRESS_FADE_SPEED = 6.5;
-const MOBILE_GHOST_LIMIT = 2;
-const GHOST_LOAD_DELAY_MS = 180;
-const GHOST_EDGE_THRESHOLD_DEGREES = 42;
-const DRESS_THUMBNAIL_TARGET_HEIGHT = 1.94;
-const DRESS_THUMBNAIL_TARGET_WIDTH = 1.62;
-const CYCLO_WIDTH = 8.6;
-const CYCLO_FRONT_Z = 4.4;
-const CYCLO_BACK_Z = -2.08;
-const CYCLO_WALL_HEIGHT = 4.72;
-const CYCLO_RADIUS = 1.22;
-const CYCLO_TEXTURE_REPEAT_X = 3.25;
-const CYCLO_TEXTURE_FALLBACK_ASPECT = 663 / 617;
-// Browser pixel ratio may be 2 or 3 on high-density displays. Capping it at 1.5
-// trades a small amount of sharpness for substantially fewer shaded pixels.
-const MAX_PIXEL_RATIO = 2;
-const MOBILE_MAX_PIXEL_RATIO = 2;
-const MOBILE_EFFECT_PIXEL_RATIO = 1;
-
-function usesMobileRenderProfile() {
-  return window.matchMedia('(max-width: 720px), (pointer: coarse)').matches;
-}
-
-function usesSingleContextMewLayout() {
-  return usesMobileRenderProfile();
-}
-
-function getRenderPixelRatio() {
-  const maximum = usesMobileRenderProfile() ? MOBILE_MAX_PIXEL_RATIO : MAX_PIXEL_RATIO;
-  return Math.min(window.devicePixelRatio, maximum);
-}
-
-function getEffectPixelRatio() {
-  return usesMobileRenderProfile() ? MOBILE_EFFECT_PIXEL_RATIO : getRenderPixelRatio();
-}
-
-const TARGET_RENDER_FPS = 60;
-const TARGET_RENDER_INTERVAL_MS = 1000 / TARGET_RENDER_FPS;
 let lastRenderedAt = 0;
 const cycloramaBackgroundSettings: CycloramaBackgroundSettings = {
   preset: CYCLO_BACKGROUND_DEFAULT,
 };
 const dressAssetSettings = {
   asset: DRESS_ASSET_DEFAULT,
-};
-const cinematicSettings = {
-  // These are deliberately restrained. Post effects should change texture and
-  // cohesion without becoming more important than the garment.
-  enabled: true,
-  filmGrain: 0.132,
-  diffusion: 0.018,
-  halation: 0.032,
-  vignette: 0.026,
-  saturation: 1.03,
-  contrast: 0.985,
-  warmHighlights: 0.018,
-  blackLift: 0.009,
-};
-const DRESS_MATERIAL_GRAIN_STRENGTH = 0.04;
-const TABLA_RASA_ACCENT_COLORS = [
-  0xfdfefe,
-  0xf0f4f7,
-  0xdfe7ed,
-  0xcbd5de,
-  0xb9c4ce,
-  0xf7f9fb,
-];
-const ivoryBackgroundOpticsSettings = {
-  strength: 0.058,
-  radiusScale: 0.94,
-  pulseSpeed: 0.68,
 };
 const cycloramaBackgroundUniforms: CycloramaBackgroundUniforms = {
   // Numeric modes are used because WebGL 1-era shader branching cannot switch
@@ -653,343 +426,6 @@ const infiniteBackdropUniforms: InfiniteBackdropUniforms = {
   uHeroStillAspect: { value: 907 / 512 },
 };
 
-// ---------------------------------------------------------------------------
-// FULL-FRAME CINEMATIC FINISH SHADER
-// ---------------------------------------------------------------------------
-// A ShaderPass automatically supplies the previous pass as `tDiffuse`. This is
-// an image-space shader: it knows nothing about dresses, lights, or 3D world
-// positions. It sees only the completed RGBA image and its UV coordinates.
-//
-// Important distinction:
-// - Material shader: determines how a 3D surface is drawn.
-// - Post-processing shader: transforms an already rendered 2D image.
-//
-// This one implements subtle diffusion, halation, color shaping, grain, and a
-// vignette. All calculations remain in one pass to avoid extra render targets.
-const CINEMATIC_FINISH_SHADER = {
-  uniforms: {
-    tDiffuse: { value: null },
-    uTime: { value: 0 },
-    uResolution: { value: new THREE.Vector2(1, 1) },
-    uEnabled: { value: cinematicSettings.enabled ? 1 : 0 },
-    uFilmGrain: { value: cinematicSettings.filmGrain },
-    uDiffusion: { value: cinematicSettings.diffusion },
-    uHalation: { value: cinematicSettings.halation },
-    uVignette: { value: cinematicSettings.vignette },
-    uSaturation: { value: cinematicSettings.saturation },
-    uContrast: { value: cinematicSettings.contrast },
-    uWarmHighlights: { value: cinematicSettings.warmHighlights },
-    uBlackLift: { value: cinematicSettings.blackLift },
-  },
-  vertexShader: `
-    // Varying values are interpolated by the rasterizer. If one vertex writes
-    // UV (0,0) and another writes (1,0), fragments between them receive values
-    // between 0 and 1 automatically.
-    varying vec2 vUv;
-
-    void main() {
-      vUv = uv;
-      // This shader runs on a full-screen plane, but using the standard matrix
-      // transform keeps it compatible with Three.js's ShaderPass machinery.
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    }
-  `,
-  fragmentShader: `
-    // tDiffuse is the color texture produced by the preceding composer pass.
-    uniform sampler2D tDiffuse;
-    uniform float uTime;
-    uniform vec2 uResolution;
-    uniform float uEnabled;
-    uniform float uFilmGrain;
-    uniform float uDiffusion;
-    uniform float uHalation;
-    uniform float uVignette;
-    uniform float uSaturation;
-    uniform float uContrast;
-    uniform float uWarmHighlights;
-    uniform float uBlackLift;
-    varying vec2 vUv;
-
-    // Fast deterministic pseudo-randomness. This is not cryptographic or truly
-    // random; neighboring inputs merely produce visually uncorrelated values.
-    float hash(vec2 value) {
-      return fract(sin(dot(value, vec2(12.9898, 78.233))) * 43758.5453123);
-    }
-
-    // Human vision is more sensitive to green than blue. These Rec. 601-style
-    // weights estimate perceived brightness rather than averaging RGB equally.
-    float lumaOf(vec3 color) {
-      return dot(color, vec3(0.299, 0.587, 0.114));
-    }
-
-    void main() {
-      vec4 source = texture2D(tDiffuse, vUv);
-
-      // ShaderPasses are cheaper to leave wired into the composer and bypass in
-      // GLSL than to repeatedly rebuild the pass graph.
-      if (uEnabled < 0.5) {
-        gl_FragColor = source;
-        return;
-      }
-
-      // One texel equals one pixel in UV units. At 1000 px wide, texel.x is
-      // 0.001. Sampling vUv + texel * 2.0 reads two pixels away.
-      vec2 texel = 1.0 / max(uResolution, vec2(1.0));
-      vec3 color = source.rgb;
-      float luma = lumaOf(color);
-      float highlights = smoothstep(0.66, 0.98, luma);
-
-      // A tiny diffusion blend softens scan harshness without making the frame
-      // look blurred. Neighbor samples are alpha-weighted so the same shader can
-      // be used on transparent subject overlays without darkening object edges.
-      // This hand-written nine-tap blur is a small convolution kernel. A true
-      // Gaussian blur may use more taps or two separable passes; nine taps are
-      // sufficient because the requested diffusion is very low.
-      vec3 soft = color * source.a * 0.36;
-      float softWeight = source.a * 0.36;
-      vec4 softSample = texture2D(tDiffuse, vUv + texel * vec2(1.6, 0.0));
-      soft += softSample.rgb * softSample.a * 0.08;
-      softWeight += softSample.a * 0.08;
-      softSample = texture2D(tDiffuse, vUv - texel * vec2(1.6, 0.0));
-      soft += softSample.rgb * softSample.a * 0.08;
-      softWeight += softSample.a * 0.08;
-      softSample = texture2D(tDiffuse, vUv + texel * vec2(0.0, 1.6));
-      soft += softSample.rgb * softSample.a * 0.08;
-      softWeight += softSample.a * 0.08;
-      softSample = texture2D(tDiffuse, vUv - texel * vec2(0.0, 1.6));
-      soft += softSample.rgb * softSample.a * 0.08;
-      softWeight += softSample.a * 0.08;
-      softSample = texture2D(tDiffuse, vUv + texel * vec2(2.8, 2.8));
-      soft += softSample.rgb * softSample.a * 0.08;
-      softWeight += softSample.a * 0.08;
-      softSample = texture2D(tDiffuse, vUv + texel * vec2(-2.8, 2.8));
-      soft += softSample.rgb * softSample.a * 0.08;
-      softWeight += softSample.a * 0.08;
-      softSample = texture2D(tDiffuse, vUv + texel * vec2(2.8, -2.8));
-      soft += softSample.rgb * softSample.a * 0.08;
-      softWeight += softSample.a * 0.08;
-      softSample = texture2D(tDiffuse, vUv + texel * vec2(-2.8, -2.8));
-      soft += softSample.rgb * softSample.a * 0.08;
-      softWeight += softSample.a * 0.08;
-      soft = softWeight > 0.0001 ? soft / softWeight : color;
-      // mix(original, blurred, amount) performs linear interpolation. Bright
-      // regions receive slightly more diffusion than shadows.
-      color = mix(color, soft, uDiffusion * (0.55 + highlights * 0.75));
-
-      // Halation is not the same as bloom. Bloom spreads neutral light from
-      // bright areas. Film halation is a warm/red fringe caused by light
-      // scattering inside a film base. We sample a ring around the pixel, keep
-      // only highlights, tint them warm, and add a very small amount.
-      vec3 halo = vec3(0.0);
-      float haloWeight = 0.0;
-      for (int i = 0; i < 8; i += 1) {
-        // 0.785398... is π/4, so eight iterations sample eight directions.
-        float a = float(i) * 0.78539816339;
-        vec2 direction = vec2(cos(a), sin(a));
-        vec4 haloSample = texture2D(tDiffuse, vUv + direction * texel * 4.2);
-        float bright = smoothstep(0.72, 1.0, lumaOf(haloSample.rgb)) * haloSample.a;
-        halo += haloSample.rgb * bright;
-        haloWeight += bright;
-      }
-      halo /= max(haloWeight, 1.0);
-      color += halo * vec3(1.0, 0.56, 0.32) * uHalation * highlights;
-
-      // Color grading stage:
-      // - saturation interpolates between grayscale and RGB,
-      // - contrast expands/compresses values around middle gray,
-      // - black lift raises dark values,
-      // - warmHighlights biases only bright pixels.
-      luma = lumaOf(color);
-      color = mix(vec3(luma), color, uSaturation);
-      color = (color - 0.5) * uContrast + 0.5;
-      color += uBlackLift * (1.0 - luma);
-      color += vec3(1.0, 0.72, 0.44) * highlights * uWarmHighlights;
-
-      // Two differently scaled noise fields reduce obvious repetition.
-      // floor() groups pixels into tiny grain cells. Time changes their seed,
-      // producing moving grain rather than a frozen screen-door texture.
-      float grainA = hash(floor(vUv * vec2(820.0, 1180.0)) + uTime * 23.0);
-      float grainB = hash(vUv * vec2(1620.0, 940.0) + uTime * 41.0);
-      float grain = ((grainA * 0.68 + grainB * 0.32) - 0.5) * uFilmGrain;
-      color += grain * (0.82 + luma * 0.22);
-
-      // Vignette distance is measured from image center. dot(v,v) is squared
-      // vector length and avoids the square root performed by length(v).
-      vec2 centeredUv = vUv - 0.5;
-      float edge = smoothstep(0.18, 0.78, dot(centeredUv, centeredUv) * 1.55);
-      color *= 1.0 - edge * uVignette;
-
-      // Preserve source alpha so this pass also works on subject-only render
-      // targets. Clamp prevents later blending from receiving invalid ranges.
-      gl_FragColor = vec4(clamp(color, 0.0, 1.0), source.a);
-    }
-  `,
-};
-
-// ---------------------------------------------------------------------------
-// INVISIBLE CITIES EDGE-FEATHER SHADER
-// ---------------------------------------------------------------------------
-// This pass softens the rectangular boundary of an offscreen layer. It changes
-// alpha near the canvas edges while keeping the center untouched. The RGB lift
-// in the feather band prevents semitransparent edges from looking dirty gray.
-const MEW_ALPHA_FEATHER_SHADER = {
-  uniforms: {
-    tDiffuse: { value: null },
-    uFeatherWidth: { value: 0.31 },
-    uFeatherOpacity: { value: 1 },
-    uFeatherLift: { value: 0.72 },
-    uFeatherSaturation: { value: 0.46 },
-  },
-  vertexShader: `
-    varying vec2 vUv;
-
-    void main() {
-      vUv = uv;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    }
-  `,
-  fragmentShader: `
-    uniform sampler2D tDiffuse;
-    uniform float uFeatherWidth;
-    uniform float uFeatherOpacity;
-    uniform float uFeatherLift;
-    uniform float uFeatherSaturation;
-    varying vec2 vUv;
-
-    void main() {
-      vec4 color = texture2D(tDiffuse, vUv);
-
-      // Rectangular image-space layer mask: the center stays fully sharp, and
-      // each canvas edge dissolves outward. This preserves the editorial page
-      // rectangle while avoiding a hard cut.
-      // At UV 0.5, distance to either edge is 0.5. At UV 0.01, the nearest
-      // horizontal edge is 0.01. Taking the minimum of X/Y produces a rectangle
-      // rather than a circular vignette.
-      vec2 edgeDistance = min(vUv, 1.0 - vUv);
-      float distanceToEdge = min(edgeDistance.x, edgeDistance.y);
-      float edgeNoise =
-        sin(vUv.x * 19.0 + vUv.y * 4.0) * 0.012 +
-        sin(vUv.y * 15.0 - vUv.x * 6.0) * 0.008;
-      float noisyDistanceToEdge = distanceToEdge + edgeNoise;
-      // smoothstep(edge0, edge1, x) returns 0 below edge0, 1 above edge1,
-      // and a smooth Hermite curve between. It is the workhorse for soft masks.
-      float mask = smoothstep(0.0, uFeatherWidth, noisyDistanceToEdge);
-      float featherBand = (1.0 - mask) * smoothstep(0.01, uFeatherWidth * 0.82, noisyDistanceToEdge);
-
-      // Keep the transparent feather luminous instead of gray: the RGB is lifted
-      // only inside the fading band, while alpha still dissolves to the page.
-      float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
-      color.rgb = mix(vec3(luma), color.rgb, 1.0 + featherBand * uFeatherSaturation);
-      color.rgb = mix(
-        color.rgb,
-        min(color.rgb * (1.0 + featherBand * 0.38) + vec3(0.08, 0.045, 0.09) * featherBand, vec3(1.0)),
-        uFeatherLift
-      );
-
-      color.a *= mix(1.0, mask, uFeatherOpacity);
-      gl_FragColor = color;
-    }
-  `,
-};
-
-// ---------------------------------------------------------------------------
-// IVORY OPTICAL-DISTORTION SHADER
-// ---------------------------------------------------------------------------
-// Instead of moving geometry, this shader offsets the UV used to sample the
-// already-rendered image. That technique is commonly called a screen-space
-// distortion, displacement, refraction, heat-haze, or lens warp.
-const IVORY_BACKGROUND_OPTICS_SHADER = {
-  uniforms: {
-    tDiffuse: { value: null },
-    uTime: { value: 0 },
-    uAspect: { value: window.innerWidth / Math.max(1, window.innerHeight) },
-    uStrength: { value: ivoryBackgroundOpticsSettings.strength },
-    uRadiusScale: { value: ivoryBackgroundOpticsSettings.radiusScale },
-    uPulseSpeed: { value: ivoryBackgroundOpticsSettings.pulseSpeed },
-  },
-  vertexShader: `
-    varying vec2 vUv;
-
-    void main() {
-      vUv = uv;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    }
-  `,
-  fragmentShader: `
-    uniform sampler2D tDiffuse;
-    uniform float uTime;
-    uniform float uAspect;
-    uniform float uStrength;
-    uniform float uRadiusScale;
-    uniform float uPulseSpeed;
-    varying vec2 vUv;
-
-    float hash(vec2 value) {
-      return fract(sin(dot(value, vec2(127.1, 311.7))) * 43758.5453123);
-    }
-
-    vec2 hash2(vec2 value) {
-      return vec2(hash(value), hash(value + 19.37));
-    }
-
-    void main() {
-      vec2 uv = vUv;
-      vec2 totalOffset = vec2(0.0);
-      float glassShade = 0.0;
-
-      for (int i = 0; i < 4; i += 1) {
-        // GLSL loops generally require compile-time fixed bounds on broad WebGL
-        // hardware. Four lobes are unrolled by the shader compiler.
-        float fi = float(i);
-        float cycle = uTime * uPulseSpeed / (5.8 + fi * 1.35) + fi * 8.73;
-        // id changes once per pulse and reseeds its location. phase travels
-        // continuously from 0..1 during that pulse.
-        float id = floor(cycle);
-        float phase = fract(cycle);
-        float lobeActive = step(0.48, hash(vec2(id, fi)));
-        float fadeIn = smoothstep(0.0, 0.16, phase);
-        float fadeOut = 1.0 - smoothstep(0.58, 1.0, phase);
-        float pulse = fadeIn * fadeOut * lobeActive;
-
-        vec2 randoms = hash2(vec2(id + 3.1, fi + 5.4));
-        vec2 center = mix(vec2(0.14, 0.18), vec2(0.86, 0.84), randoms);
-        center += vec2(
-          sin(uTime * (0.13 + fi * 0.025) + randoms.x * 6.2831853),
-          cos(uTime * (0.11 + fi * 0.02) + randoms.y * 6.2831853)
-        ) * 0.035;
-
-        float radius = mix(0.15, 0.34, hash(vec2(id + 7.0, fi))) * uRadiusScale;
-        float sign = mix(-1.0, 1.0, step(0.5, hash(vec2(id + 11.0, fi))));
-        vec2 axis = vec2(
-          mix(0.72, 1.42, hash(vec2(id + 13.0, fi))),
-          mix(0.72, 1.42, hash(vec2(id + 17.0, fi)))
-        );
-        // Multiplying X by aspect makes a circular distance field remain round
-        // on a wide viewport. axis then intentionally makes it elliptical.
-        vec2 aspectDelta = (uv - center) * vec2(uAspect, 1.0) * axis;
-        float distanceToLobe = length(aspectDelta);
-        float falloff = smoothstep(radius, 0.0, distanceToLobe);
-
-        vec2 radial = normalize(aspectDelta + vec2(0.0001));
-        vec2 uvRadial = radial / vec2(uAspect, 1.0) / axis;
-        float organicPulse = 0.72 + 0.28 * sin(phase * 6.2831853 + hash(vec2(id, fi + 23.0)) * 6.2831853);
-        // We accumulate UV displacement, not RGB color. Positive/negative sign
-        // alternates between bulging and pinching lens behavior.
-        totalOffset += uvRadial * falloff * falloff * pulse * organicPulse * sign * uStrength;
-        float lensEdge = pow(max(falloff * (1.0 - falloff), 0.0) * 4.0, 1.35);
-        glassShade += lensEdge * pulse * 0.035;
-        glassShade += falloff * pulse * sign * 0.008;
-      }
-
-      // Clamp avoids sampling outside the render target, where wrap mode could
-      // create a bright seam or repeat the opposite side of the frame.
-      vec2 sampleUv = clamp(uv - totalOffset, vec2(0.001), vec2(0.999));
-      vec4 color = texture2D(tDiffuse, sampleUv);
-      color.rgb += glassShade;
-      gl_FragColor = vec4(clamp(color.rgb, 0.0, 1.0), color.a);
-    }
-  `,
-};
 let cycloramaTextureAspect = CYCLO_TEXTURE_FALLBACK_ASPECT;
 let cycloramaMesh: THREE.Mesh | null = null;
 let cycloramaMaterial: THREE.MeshStandardMaterial | null = null;
@@ -1035,9 +471,13 @@ const dressGhostGroup = new THREE.Group();
 dressGhostGroup.name = 'dress ghost layer';
 scene.add(dressGhostGroup);
 
-const disposableMaterials: THREE.Material[] = [];
-const disposableGeometries: THREE.BufferGeometry[] = [];
-const disposableTextures: THREE.Texture[] = [];
+const resourceTracker = new ResourceTracker();
+const trackGeometry = <T extends THREE.BufferGeometry>(geometry: T) =>
+  resourceTracker.trackGeometry(geometry);
+const trackMaterial = <T extends THREE.Material>(material: T) =>
+  resourceTracker.trackMaterial(material);
+const trackTexture = <T extends THREE.Texture>(texture: T) =>
+  resourceTracker.trackTexture(texture);
 
 // PerspectiveCamera arguments:
 // 1. vertical field of view in degrees,
@@ -1308,140 +748,15 @@ const subjectBloomPipeline = createSubjectBloomPipeline(renderer);
 // Keep this backing store stable across viewport changes. Resizing the source
 // canvas under a live CanvasTexture can leave Safari with a partially updated
 // texture, which showed up as duplicated title frames on desktop resizes.
-const MEW_TITLE_MASK_WIDTH = 1536;
-const MEW_TITLE_MASK_HEIGHT = 1024;
-const mewTitleOverlayCanvas = document.createElement('canvas');
-mewTitleOverlayCanvas.width = MEW_TITLE_MASK_WIDTH;
-mewTitleOverlayCanvas.height = MEW_TITLE_MASK_HEIGHT;
-const maybeMewTitleOverlayContext = mewTitleOverlayCanvas.getContext('2d');
-if (!maybeMewTitleOverlayContext) {
-  throw new Error('Could not create the Invisible Cities title overlay.');
-}
-const mewTitleOverlayContext: CanvasRenderingContext2D = maybeMewTitleOverlayContext;
-const mewTitleOverlayTexture = new THREE.CanvasTexture(mewTitleOverlayCanvas);
-// Color textures and UI canvases are authored for display, so mark them sRGB.
-// Data textures (normals, depth, masks) usually remain linear/no-color-space.
-mewTitleOverlayTexture.colorSpace = THREE.SRGBColorSpace;
-mewTitleOverlayTexture.minFilter = THREE.LinearFilter;
-mewTitleOverlayTexture.magFilter = THREE.LinearFilter;
-const mewTitleOverlayScene = new THREE.Scene();
-const mewTitleOverlayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-const mewTitleOverlayGeometry = new THREE.PlaneGeometry(2, 2);
-const mewTitleOverlayMaterial = new THREE.ShaderMaterial({
-  uniforms: {
-    uBackground: { value: null },
-    uMask: { value: mewTitleOverlayTexture },
-    uBlackOpacity: { value: 1 },
-    uBackgroundNeedsOutput: { value: 0 },
-    uToneMappingExposure: { value: 0.64 },
-  },
-  vertexShader: `
-    varying vec2 vUv;
-
-    void main() {
-      vUv = uv;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    }
-  `,
-  fragmentShader: `
-    uniform sampler2D uBackground;
-    uniform sampler2D uMask;
-    uniform float uBlackOpacity;
-    uniform float uBackgroundNeedsOutput;
-    uniform float uToneMappingExposure;
-    varying vec2 vUv;
-
-    vec3 rrtAndOdtFit(vec3 value) {
-      vec3 a = value * (value + 0.0245786) - 0.000090537;
-      vec3 b = value * (0.983729 * value + 0.4329510) + 0.238081;
-      return a / b;
-    }
-
-    vec3 acesFilmicToneMapping(vec3 color) {
-      const mat3 inputMatrix = mat3(
-        vec3(0.59719, 0.07600, 0.02840),
-        vec3(0.35458, 0.90834, 0.13383),
-        vec3(0.04823, 0.01566, 0.83777)
-      );
-      const mat3 outputMatrix = mat3(
-        vec3(1.60475, -0.10208, -0.00327),
-        vec3(-0.53108, 1.10813, -0.07276),
-        vec3(-0.07367, -0.00605, 1.07602)
-      );
-      color *= uToneMappingExposure / 0.6;
-      color = inputMatrix * color;
-      color = rrtAndOdtFit(color);
-      return clamp(outputMatrix * color, 0.0, 1.0);
-    }
-
-    vec3 linearToSrgb(vec3 color) {
-      return mix(
-        pow(color, vec3(0.41666)) * 1.055 - vec3(0.055),
-        color * 12.92,
-        vec3(lessThanEqual(color, vec3(0.0031308)))
-      );
-    }
-
-    float piecewiseRamp(float value, float a, float b, float c, float d, float e, float f, float g, float h) {
-      if (value < a) return mix(0.0, b, value / a);
-      if (value < c) return mix(b, d, (value - a) / (c - a));
-      if (value < e) return mix(d, 1.0, (value - c) / (e - c));
-      if (value < f) return 1.0;
-      if (value < g) return mix(1.0, h, (value - f) / (g - f));
-      if (value < 0.95) return mix(h, 0.1, (value - g) / (0.95 - g));
-      return mix(0.1, 0.0, (value - 0.95) / 0.05);
-    }
-
-    float mainCanvasMask(vec2 uv) {
-      // Mirrors the main Mew canvas's two CSS mask gradients. The visible
-      // canvas is alpha-composited over white after this mask is applied.
-      float horizontal = piecewiseRamp(uv.x, 0.05, 0.1, 0.12, 0.52, 0.24, 0.76, 0.88, 0.52);
-      float vertical = piecewiseRamp(uv.y, 0.04, 0.12, 0.09, 0.55, 0.15, 0.75, 0.87, 0.5);
-      return horizontal * vertical;
-    }
-
-    void main() {
-      // Mask RGB is irrelevant; its alpha defines the letter silhouettes.
-      vec4 mask = texture2D(uMask, vUv);
-      // Keep the word in its editorial position while sampling the visible
-      // chromatic field behind the dress.
-      vec2 backgroundUv = vec2(vUv.x, clamp(vUv.y, 0.0, 1.0));
-      vec4 background = texture2D(uBackground, backgroundUv);
-      if (uBackgroundNeedsOutput > 0.5) {
-        background.rgb = linearToSrgb(acesFilmicToneMapping(background.rgb));
-      }
-      // The main canvas fades through alpha into the white Mew page. Sampling
-      // only RGB would expose transparent pixels' darker stored color instead
-      // of the exact color actually visible behind the dress.
-      vec3 backgroundColor = mix(
-        vec3(1.0),
-        background.rgb,
-        clamp(background.a * mainCanvasMask(backgroundUv), 0.0, 1.0)
-      );
-      // uBlackOpacity is an interpolation amount, not material opacity:
-      // 0 = exact background color in the stencil
-      // 1 = black title color in the stencil
-
-    vec3 titleColor = mix(backgroundColor, vec3(0.043), uBlackOpacity);
-
-    // mask.a = full silhouette: border + letters
-    // mask.r = inner letters only, because canvas fill is white
-    float fullShape = mask.a;
-    float innerLetters = mask.r;
-
-    // Border gets black. Letter interior keeps the existing title behavior.
-    vec3 finalColor = mix(vec3(0.0), titleColor, innerLetters);
-
-    gl_FragColor = vec4(finalColor, fullShape);
-    }
-  `,
-  transparent: true,
-  depthTest: false,
-  depthWrite: false,
-  toneMapped: false,
-});
-mewTitleOverlayScene.add(new THREE.Mesh(mewTitleOverlayGeometry, mewTitleOverlayMaterial));
-
+const {
+  mewTitleOverlayCanvas,
+  mewTitleOverlayContext,
+  mewTitleOverlayTexture,
+  mewTitleOverlayScene,
+  mewTitleOverlayCamera,
+  mewTitleOverlayGeometry,
+  mewTitleOverlayMaterial,
+} = createMewTitleOverlay();
 function ensureMewForegroundPipeline() {
   if (mewForegroundPipeline) {
     return mewForegroundPipeline;
@@ -1572,19 +887,18 @@ const fullDressCache = new Map<DressAssetId, FullDressRecord>();
 const fullDressPreloadPromises = new Map<DressAssetId, Promise<FullDressRecord | null>>();
 const ghostDressCache = new Map<DressAssetId, GhostDressRecord>();
 const dressThumbnailRecords = new Map<DressAssetId, DressThumbnailRecord>();
-const signalGraphNodeRecords = new Map<DressAssetId, SignalGraphNodeRecord>();
+const signalDiptych = new SignalDiptych({
+  element: signalDiptychElement,
+  thumbnails: dressThumbnailRecords,
+  getThemeId: () => cycloramaBackgroundSettings.preset,
+  getDressId: () => dressAssetSettings.asset,
+  getPixelRatio: getRenderPixelRatio,
+});
 const ghostPickTargets: THREE.Object3D[] = [];
 const ghostRaycaster = new THREE.Raycaster();
 const ghostPointer = new THREE.Vector2();
 const activeDressRaycaster = new THREE.Raycaster();
 const activeDressPointer = new THREE.Vector2();
-const materialFadeOriginals = new WeakMap<THREE.Material, {
-  opacity: number;
-  transparent: boolean;
-  depthWrite: boolean;
-}>();
-// WeakMap does not keep materials alive by itself. When a material is disposed
-// elsewhere, this bookkeeping entry can be garbage-collected automatically.
 const timer = new THREE.Timer();
 timer.connect(document);
 const zeroWind = new THREE.Vector3();
@@ -1948,7 +1262,7 @@ function activateFullDress(record: FullDressRecord) {
     maybeStartDressTransitionFx();
   }
 
-  buildSignalDiptych();
+  signalDiptych.build();
 }
 
 // Kicks off the transition bloom/glitch envelope, but only for Blue + Mew Holo.
@@ -3052,7 +2366,7 @@ function renderDressThumbnails() {
     // In signal we render the ghost dress into the graph-node canvases (which
     // reuse the same scenes as the regular thumbnails). The switcher's canvases
     // themselves are display:none here so we skip rendering into them.
-    renderSignalGraphNodes();
+    signalDiptych.render();
     return;
   }
 
@@ -3665,7 +2979,7 @@ function addStudio(targetScene: THREE.Scene) {
   cycloramaTexture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
   syncCycloramaBackgroundUniforms();
 
-  infiniteBackdropMaterial = trackMaterial(createInfiniteBackdropMaterial());
+  infiniteBackdropMaterial = trackMaterial(createInfiniteBackdropMaterial(infiniteBackdropUniforms));
   infiniteBackdropMesh = new THREE.Mesh(trackGeometry(new THREE.PlaneGeometry(1, 1, 1, 1)), infiniteBackdropMaterial);
   infiniteBackdropMesh.name = 'infinite theme backdrop';
   // The backdrop is parented to the camera. Its local transform therefore
@@ -3700,7 +3014,7 @@ function addStudio(targetScene: THREE.Scene) {
       envMapIntensity: 0.24,
     }),
   );
-  patchCycloramaBackgroundMaterial(cycloramaMaterial);
+  patchCycloramaBackgroundMaterial(cycloramaMaterial, cycloramaBackgroundUniforms);
   cycloramaHoloMaterial = trackMaterial(
     new THREE.MeshBasicMaterial({
       color: 0xffffff,
@@ -3709,7 +3023,7 @@ function addStudio(targetScene: THREE.Scene) {
       toneMapped: false,
     }),
   );
-  patchCycloramaBackgroundMaterial(cycloramaHoloMaterial);
+  patchCycloramaBackgroundMaterial(cycloramaHoloMaterial, cycloramaBackgroundUniforms);
   cycloramaMesh = new THREE.Mesh(trackGeometry(createCycloramaGeometry()), cycloramaMaterial);
   cycloramaMesh.receiveShadow = false;
   targetScene.add(cycloramaMesh);
@@ -3791,243 +3105,6 @@ function addStudio(targetScene: THREE.Scene) {
   paperRollMesh.rotation.z = Math.PI / 2;
   paperRollMesh.position.set(0, 4.72, -2.08);
   targetScene.add(paperRollMesh);
-}
-
-function createInfiniteBackdropMaterial() {
-  // One ShaderMaterial serves several themes. `uBackdropMode` selects a branch
-  // in the fragment shader. Reusing one material avoids shader recompilation
-  // during theme switches and keeps every background on the same full-screen
-  // camera-attached plane.
-  return new THREE.ShaderMaterial({
-    uniforms: infiniteBackdropUniforms,
-    vertexShader: `
-      varying vec2 vUv;
-
-      void main() {
-        vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: `
-      uniform float uBackdropMode;
-      uniform float uBackdropTime;
-      uniform float uBackdropAspect;
-      uniform sampler2D uGraphicTexture;
-      uniform sampler2D uGraphicVerticalTexture;
-      uniform sampler2D uHeroStillTexture;
-      uniform float uGraphicAspect;
-      uniform float uGraphicVerticalAspect;
-      uniform float uHeroStillAspect;
-      varying vec2 vUv;
-
-      // These small helper functions are reusable shader building blocks.
-      // hash() creates repeatable noise from coordinates.
-      float hash(vec2 value) {
-        return fract(sin(dot(value, vec2(127.1, 311.7))) * 43758.5453123);
-      }
-
-      float softBlob(vec2 uv, vec2 center, vec2 scale, float radius, float feather) {
-        // This is a signed-distance-style mask. Scaling the delta makes an
-        // ellipse; smoothstep converts distance into a feathered 1→0 field.
-        return smoothstep(radius + feather, radius - feather, length((uv - center) * scale));
-      }
-
-      float lineDistance(vec2 p, vec2 a, vec2 b) {
-        vec2 pa = p - a;
-        vec2 ba = b - a;
-        float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-        return length(pa - ba * h);
-      }
-
-      vec3 screenBlend(vec3 base, vec3 blend) {
-        // Screen blend is the inverse-multiply formula used in image editors.
-        // It can only brighten, making it useful for faded projected color.
-        return 1.0 - (1.0 - base) * (1.0 - blend);
-      }
-
-      vec2 coverUv(vec2 uv, float imageAspect, float surfaceAspect) {
-        // Equivalent to CSS background-size: cover: crop one axis while
-        // preserving image proportions. Stretching would distort the archive.
-        vec2 scale = vec2(1.0);
-
-        if (surfaceAspect > imageAspect) {
-          scale.y = imageAspect / surfaceAspect;
-        } else {
-          scale.x = surfaceAspect / imageAspect;
-        }
-
-        return (uv - 0.5) * scale + 0.5;
-      }
-
-      vec3 sampleEditorialPaper(vec2 uv) {
-        vec4 sampled;
-
-        // Use a portrait source on narrow canvases so the crop retains useful
-        // content rather than throwing away most of a wide photograph.
-        if (uBackdropAspect < 0.82) {
-          sampled = texture2D(
-            uGraphicVerticalTexture,
-            coverUv(uv, uGraphicVerticalAspect, uBackdropAspect)
-          );
-        } else {
-          sampled = texture2D(
-            uGraphicTexture,
-            coverUv(uv, uGraphicAspect, uBackdropAspect)
-          );
-        }
-
-        // The custom ShaderMaterial bypasses some automatic built-in material
-        // color conversion, so explicitly decode sRGB texture values to linear
-        // light before mixing them.
-        return sRGBTransferEOTF(sampled).rgb;
-      }
-
-      vec3 blueBackdrop(vec2 uv) {
-        vec3 turquoise = vec3(0.02, 0.64, 0.72);
-        vec3 lapis = vec3(0.025, 0.18, 0.52);
-        vec3 ink = vec3(0.015, 0.08, 0.28);
-        float vertical = smoothstep(-0.08, 1.08, uv.y);
-        float diagonal = smoothstep(-0.18, 1.18, uv.x * 0.34 + uv.y * 0.52);
-        vec3 color = mix(turquoise, lapis, vertical * 0.58);
-        color = mix(color, ink, diagonal * 0.18);
-        color += vec3(0.02, 0.08, 0.1) * softBlob(uv, vec2(0.18, 0.72), vec2(0.95, 0.7), 0.58, 0.42);
-        return color;
-      }
-
-      vec3 mewBackdrop(vec2 uv) {
-        // Warping UV before evaluating color fields makes their boundaries feel
-        // fluid. The actual screen geometry never moves.
-        vec2 warped = uv;
-        warped.x += sin(uv.y * 5.2 + uBackdropTime * 0.09) * 0.035;
-        warped.y += sin(uv.x * 4.6 - uBackdropTime * 0.07) * 0.03;
-        warped += vec2(
-          sin((uv.x + uv.y) * 8.0 + uBackdropTime * 0.06),
-          cos((uv.x - uv.y) * 7.0 - uBackdropTime * 0.05)
-        ) * 0.018;
-
-        vec3 cyan = vec3(0.28, 0.98, 1.0);
-        vec3 mint = vec3(0.42, 1.0, 0.36);
-        vec3 acid = vec3(1.0, 0.98, 0.1);
-        vec3 pink = vec3(1.0, 0.08, 0.76);
-        vec3 pearl = vec3(1.0, 0.9, 0.98);
-        vec3 violet = vec3(0.52, 0.32, 1.0);
-
-        float mintPool = softBlob(warped, vec2(0.2, 0.26), vec2(0.75, 1.08), 0.64, 0.38);
-        float pinkPool = softBlob(warped, vec2(0.72, 0.46), vec2(1.08, 0.78), 0.52, 0.34);
-        float yellowPool = softBlob(warped, vec2(0.78, 0.84), vec2(0.86, 1.16), 0.4, 0.32);
-        float violetPool = softBlob(warped, vec2(0.32, 0.74), vec2(1.18, 0.92), 0.45, 0.34);
-        float broadPink = smoothstep(-0.12, 1.08, warped.x * 0.92 + warped.y * 0.18);
-        float broadMint = 1.0 - smoothstep(0.08, 1.02, warped.x * 0.42 + warped.y * 0.88);
-        float broadYellow = smoothstep(0.18, 1.02, warped.x * 0.26 + warped.y * 0.96);
-        float diagonalSheen = pow(smoothstep(0.78, 1.0, sin((warped.x * 3.2 - warped.y * 2.5 + 0.18) * 6.2831853) * 0.5 + 0.5), 4.2);
-        float fineFoil = pow(smoothstep(0.86, 1.0, sin((warped.x * 15.0 + warped.y * 12.0 + uBackdropTime * 0.12) * 6.2831853) * 0.5 + 0.5), 3.0);
-
-        vec3 color = mix(cyan, pearl, 0.13);
-        color = mix(color, pink, broadPink * 0.24);
-        color = mix(color, mint, broadMint * 0.3);
-        color = mix(color, acid, broadYellow * 0.18);
-        color = mix(color, mint, mintPool * 0.94);
-        color = mix(color, pink, pinkPool * 0.86);
-        color = mix(color, acid, yellowPool * 0.78);
-        color = mix(color, violet, violetPool * 0.5);
-        color = mix(color, pearl, diagonalSheen * 0.2 + fineFoil * 0.09);
-
-        float shardA = smoothstep(0.035, 0.0, lineDistance(warped, vec2(0.08, 0.78), vec2(0.88, 0.2)));
-        float shardB = smoothstep(0.026, 0.0, lineDistance(warped, vec2(0.0, 0.3), vec2(0.72, 0.88)));
-        float shardC = smoothstep(0.02, 0.0, lineDistance(warped, vec2(0.5, 0.02), vec2(1.0, 0.58)));
-        color += vec3(1.0, 0.96, 0.68) * shardA * 0.12;
-        color += vec3(0.4, 1.0, 0.7) * shardB * 0.1;
-        color += vec3(1.0, 0.24, 0.76) * shardC * 0.1;
-
-        // Quantizing UV into a fine grid creates stable grain cells. Slowly
-        // translating the seed makes them drift.
-        float grain = hash(floor((uv + uBackdropTime * 0.006) * vec2(520.0, 390.0))) - 0.5;
-        color += grain * 0.026;
-        color = pow(max(color, vec3(0.0)), vec3(0.78));
-        color = color * 1.08 + vec3(0.025, 0.02, 0.045);
-        float luminance = dot(color, vec3(0.299, 0.587, 0.114));
-        return clamp(mix(vec3(luminance), color, 1.68), 0.0, 1.0);
-      }
-
-      vec3 windArchiveBackdrop(vec2 uv) {
-        vec2 warped = uv;
-        warped.x += sin(uv.y * 4.2 + uBackdropTime * 0.045) * 0.014;
-        warped.y += sin(uv.x * 3.8 - uBackdropTime * 0.038) * 0.012;
-        warped += vec2(
-          sin((uv.x + uv.y) * 6.0 + uBackdropTime * 0.03),
-          cos((uv.x - uv.y) * 5.0 - uBackdropTime * 0.026)
-        ) * 0.007;
-
-        vec3 color = sampleEditorialPaper(warped);
-        vec3 fadedRose = vec3(0.72, 0.27, 0.31);
-        vec3 oxidizedTeal = vec3(0.12, 0.38, 0.38);
-        vec3 inkBlue = vec3(0.08, 0.16, 0.25);
-        vec3 antiqueGold = vec3(0.73, 0.49, 0.2);
-        float roseField = softBlob(warped, vec2(0.18, 0.7), vec2(0.78, 1.05), 0.52, 0.34);
-        float tealField = softBlob(warped, vec2(0.82, 0.38), vec2(0.86, 0.8), 0.52, 0.34);
-        float blueField = softBlob(warped, vec2(0.48, 0.6), vec2(0.92, 0.76), 0.48, 0.34);
-        float goldField = softBlob(warped, vec2(0.7, 0.84), vec2(0.86, 1.1), 0.4, 0.32);
-        color = mix(color, screenBlend(color, fadedRose), roseField * 0.18);
-        color = mix(color, screenBlend(color, oxidizedTeal), tealField * 0.16);
-        color = mix(color, screenBlend(color, inkBlue), blueField * 0.1);
-        color = mix(color, screenBlend(color, antiqueGold), goldField * 0.12);
-
-        float fineFoil = pow(
-          smoothstep(
-            0.88,
-            1.0,
-            sin((warped.x * 15.0 + warped.y * 11.0 + uBackdropTime * 0.05) * 6.2831853) * 0.5 + 0.5
-          ),
-          3.0
-        );
-        color += vec3(0.18, 0.13, 0.08) * fineFoil * 0.025;
-        float grain = hash(floor((uv + uBackdropTime * 0.002) * vec2(520.0, 390.0))) - 0.5;
-        color += grain * 0.008;
-        return clamp(color, 0.0, 1.0);
-      }
-
-      vec3 signalBackdrop(vec2 uv) {
-        vec2 p = (uv - 0.5) * vec2(uBackdropAspect, 1.0);
-        vec3 color = vec3(0.018, 0.019, 0.017);
-        float paperGrain = hash(floor((uv + vec2(0.03, 0.07)) * vec2(460.0, 620.0))) - 0.5;
-        float scuff = hash(floor((uv + vec2(0.31, 0.17)) * vec2(72.0, 110.0)));
-        color += vec3(paperGrain * 0.042 + smoothstep(0.992, 1.0, scuff) * 0.09);
-
-        float centerFalloff = smoothstep(0.76, 0.08, length(p * vec2(0.86, 1.12)));
-        float sideDarken = smoothstep(0.42, 1.05, abs(p.x));
-        color += vec3(0.012, 0.014, 0.012) * centerFalloff;
-        color *= 1.0 - sideDarken * 0.18;
-        color *= 1.0 - smoothstep(0.66, 1.04, length(p)) * 0.28;
-        return clamp(color, 0.0, 1.0);
-      }
-
-      void main() {
-        vec2 uv = vUv;
-        vec3 color = blueBackdrop(uv);
-
-        // Float thresholds emulate an enum:
-        // 0 = Dialectic blue
-        // 1 = Invisible Cities color field
-        // 2 = Signal black
-        // 3 = Wind Archive paper
-        if (uBackdropMode > 2.5) {
-          color = windArchiveBackdrop(uv);
-        } else if (uBackdropMode > 1.5) {
-          color = signalBackdrop(uv);
-        } else if (uBackdropMode > 0.5) {
-          color = mewBackdrop(uv);
-        }
-
-        gl_FragColor = vec4(color, 1.0);
-      }
-    `,
-    // This camera-attached plane is a background compositing layer, not an
-    // occluding 3D object, so it neither tests nor writes the depth buffer.
-    depthTest: false,
-    depthWrite: false,
-    fog: false,
-    toneMapped: false,
-  });
 }
 
 function addSignalBlackAccents(targetScene: THREE.Scene) {
@@ -5276,228 +4353,15 @@ function createIvoryMarbleTexture() {
   return texture;
 }
 
-function createCycloramaGeometry() {
-  // A cyclorama is a floor that curves smoothly into a wall, eliminating a
-  // visible horizon seam. We build one custom BufferGeometry by:
-  // 1. defining a 2D Y/Z profile (floor → quarter-circle → wall),
-  // 2. sweeping that profile across X,
-  // 3. connecting neighboring samples into triangles.
-  const xSegments = 36;
-  const floorSegments = 10;
-  const curveSegments = 18;
-  const wallSegments = 10;
-  const profile: Array<{ y: number; z: number }> = [];
-  const curveStartZ = CYCLO_BACK_Z + CYCLO_RADIUS;
 
-  for (let index = 0; index <= floorSegments; index += 1) {
-    const t = index / floorSegments;
-    profile.push({ y: 0, z: THREE.MathUtils.lerp(CYCLO_FRONT_Z, curveStartZ, t) });
-  }
 
-  for (let index = 1; index <= curveSegments; index += 1) {
-    const theta = -Math.PI / 2 - (index / curveSegments) * (Math.PI / 2);
-    profile.push({
-      y: CYCLO_RADIUS + Math.sin(theta) * CYCLO_RADIUS,
-      z: CYCLO_BACK_Z + CYCLO_RADIUS + Math.cos(theta) * CYCLO_RADIUS,
-    });
-  }
 
-  for (let index = 1; index <= wallSegments; index += 1) {
-    const t = index / wallSegments;
-    profile.push({ y: THREE.MathUtils.lerp(CYCLO_RADIUS, CYCLO_WALL_HEIGHT, t), z: CYCLO_BACK_Z });
-  }
 
-  const profileDistances = getProfileDistances(profile);
-  const surfaceLength = profileDistances[profileDistances.length - 1] || 1;
-  // Position attribute: three floats per vertex.
-  // UV attribute: two floats per vertex.
-  // Index: integers describing which three vertices form each triangle.
-  const positions: number[] = [];
-  const uvs: number[] = [];
-  const indices: number[] = [];
-  const halfWidth = CYCLO_WIDTH * 0.5;
 
-  profile.forEach((point, profileIndex) => {
-    for (let xIndex = 0; xIndex <= xSegments; xIndex += 1) {
-      const u = xIndex / xSegments;
-      const v = profileDistances[profileIndex] / surfaceLength;
-      positions.push(THREE.MathUtils.lerp(-halfWidth, halfWidth, u), point.y, point.z);
-      uvs.push(u, v);
-    }
-  });
 
-  for (let profileIndex = 0; profileIndex < profile.length - 1; profileIndex += 1) {
-    for (let xIndex = 0; xIndex < xSegments; xIndex += 1) {
-      const a = profileIndex * (xSegments + 1) + xIndex;
-      const b = a + 1;
-      const c = (profileIndex + 1) * (xSegments + 1) + xIndex;
-      const d = c + 1;
-      indices.push(a, b, c, b, d, c);
-    }
-  }
 
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  geometry.setIndex(indices);
-  // Lighting needs normals. Computing them averages adjacent triangle normals,
-  // which makes the curved floor-to-wall transition shade smoothly.
-  geometry.computeVertexNormals();
 
-  return geometry;
-}
 
-function getCycloramaRepeatY(imageAspect: number) {
-  return imageAspect * getCycloramaSurfaceLength() * CYCLO_TEXTURE_REPEAT_X / CYCLO_WIDTH;
-}
-
-function createSoftContactShadowMaterial(color: number, opacity: number) {
-  // This is a "blob shadow": an authored alpha field on a plane, not a shadow
-  // calculated by tracing light visibility. Advantages are stable softness,
-  // zero shadow-map acne, and exact art direction. The tradeoff is that it does
-  // not respond automatically when the light or silhouette changes.
-  return new THREE.ShaderMaterial({
-    uniforms: {
-      uColor: { value: new THREE.Color(color) },
-      uOpacity: { value: opacity },
-    },
-    vertexShader: `
-      varying vec2 vUv;
-
-      void main() {
-        vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: `
-      uniform vec3 uColor;
-      uniform float uOpacity;
-      varying vec2 vUv;
-
-      float hash(vec2 value) {
-        return fract(sin(dot(value, vec2(127.1, 311.7))) * 43758.5453123);
-      }
-
-      void main() {
-        // Remap UV 0..1 to a centered -1..+1 coordinate system. This makes
-        // ellipse formulas symmetrical around zero.
-        vec2 p = vUv * 2.0 - 1.0;
-        // Each length(vec2(p.x * A, p.y * B)) is an elliptical distance
-        // field. Different ellipses are layered to suggest both tight contact
-        // and a broad, diffused cast shadow.
-        float broad = smoothstep(1.0, 0.08, length(vec2(p.x * 0.72, p.y * 1.48)));
-        float contact = smoothstep(0.46, 0.02, length(vec2((p.x - 0.08) * 1.25, p.y * 2.3)));
-        float sideFalloff = smoothstep(1.0, 0.26, length(vec2((p.x + 0.18) * 0.92, p.y * 1.72)));
-        // Quantized noise varies alpha in larger paper-like cells instead of
-        // producing a perfectly digital gradient.
-        float paperBreakup = mix(0.9, 1.06, hash(floor(vUv * 14.0)));
-        float alpha = (broad * 0.7 + contact * 0.55 + sideFalloff * 0.22) * paperBreakup * uOpacity;
-
-        // discard means this fragment writes no color and no depth at all.
-        // It avoids processing nearly invisible transparent fringe pixels.
-        if (alpha < 0.002) {
-          discard;
-        }
-
-        gl_FragColor = vec4(uColor, alpha);
-      }
-    `,
-    transparent: true,
-    depthWrite: false,
-    depthTest: true,
-  });
-}
-
-function createDialecticHalftoneShadowMaterial() {
-  // This shader converts a smooth shadow-density field into a grid of square
-  // halftone marks. Classic print halftoning represents darker values with
-  // larger dots. Here the marks are squares to match the supplied reference.
-  return new THREE.ShaderMaterial({
-    vertexShader: `
-      varying vec2 vUv;
-
-      void main() {
-        vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: `
-      varying vec2 vUv;
-
-      float hash(vec2 value) {
-        return fract(sin(dot(value, vec2(127.1, 311.7))) * 43758.5453123);
-      }
-
-      void main() {
-        vec2 p = vUv * 2.0 - 1.0;
-
-        // SHADOW SHAPE CONTROLS
-        // ---------------------
-        // These values change the internal ink shape, not the mesh's distance
-        // from the dress. For physical placement, edit the position/rotation/
-        // scale documented where dialecticHalftoneShadow is constructed.
-        //
-        // X/Y additions move each ellipse within the plane's UV space.
-        // X/Y multipliers compress or stretch it.
-        float broadDistance = length(vec2((p.x + 0.04) * 1.04, (p.y + 0.12) * 0.9));
-        float contactDistance = length(vec2((p.x - 0.08) * 1.4, (p.y - 0.92) * 2.0));
-
-        // Subtracting smoothstep from 1 makes values dense at the center and
-        // fade to zero at the edge. The contact field concentrates ink near the
-        // hem while the broad field creates the larger floor footprint.
-        float broad = 1.0 - smoothstep(0.5, 1.0, broadDistance);
-        float contact = 1.0 - smoothstep(0.1, 0.54, contactDistance);
-        float density = clamp(broad * 0.68 + contact * 0.62, 0.0, 1.0);
-
-        // HALFTONE GRID CONTROLS
-        // ----------------------
-        // Larger gridScale values create more, smaller marks. The unequal X/Y
-        // counts compensate for the footprint's rectangular aspect.
-        vec2 gridScale = vec2(39.0, 22.0);
-        // floor() assigns every UV to an integer cell ID. fract() yields the
-        // position inside that cell. Subtracting 0.5 centers it, and abs()
-        // makes distance symmetric across all four quadrants.
-        vec2 grid = floor(vUv * gridScale);
-        vec2 cell = abs(fract(vUv * gridScale) - 0.5);
-        float variation = hash(grid);
-
-        // Darker density => larger square. Random variation prevents a sterile
-        // perfectly uniform screen while keeping every cell stable over time.
-        float squareSize = mix(0.015, 0.4, density) * mix(0.9, 1.06, variation);
-
-        // For a square, max(abs(x), abs(y)) is the distance to its boundary.
-        // Fragments outside the chosen half-size are discarded, leaving only
-        // the printed mark. The density test removes the ellipse's faint tail.
-        if (density < 0.05 || max(cell.x, cell.y) > squareSize) {
-          discard;
-        }
-
-        // RGB is a nearly black blue ink. Alpha still varies with density, so
-        // the center reads heavier without becoming a solid digital shape.
-        gl_FragColor = vec4(vec3(0.025, 0.055, 0.075), mix(0.22, 0.56, density));
-      }
-    `,
-    transparent: true,
-    // The subject is deliberately composited after the background. Disabling
-    // the test makes the footprint independent of the backdrop's depth, while
-    // disabling writes guarantees it cannot hide the subsequently drawn dress.
-    depthTest: false,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-    toneMapped: false,
-  });
-}
-
-function createTechnicolorYellowPlaneMaterial(color: number) {
-  const material = new THREE.MeshBasicMaterial({
-    color,
-    depthWrite: true,
-  });
-  material.fog = false;
-  material.toneMapped = false;
-
-  return material;
-}
 
 function syncCycloramaBackgroundUniforms() {
   const preset = CYCLO_BACKGROUND_PRESETS[cycloramaBackgroundSettings.preset];
@@ -5512,21 +4376,7 @@ function syncCycloramaBackgroundUniforms() {
   cycloramaBackgroundUniforms.uCycloCoverOffset.value.copy(cover.offset);
 }
 
-function getCoveredCycloramaTransform(imageAspect: number) {
-  const surfaceAspect = CYCLO_WIDTH / getCycloramaSurfaceLength();
-  const scale = new THREE.Vector2(1, 1);
 
-  if (imageAspect > surfaceAspect) {
-    scale.x = surfaceAspect / imageAspect;
-  } else {
-    scale.y = imageAspect / surfaceAspect;
-  }
-
-  return {
-    offset: new THREE.Vector2((1 - scale.x) * 0.5, (1 - scale.y) * 0.5),
-    scale,
-  };
-}
 
 function applyCycloramaBackgroundPreset(presetId: CycloramaBackgroundPresetId) {
   const preset = CYCLO_BACKGROUND_PRESETS[presetId];
@@ -5616,7 +4466,7 @@ function applyCycloramaBackgroundPreset(presetId: CycloramaBackgroundPresetId) {
   scheduleGhostDressLoads();
   renderDressThumbnails();
   updateCycloramaBackgroundButtons();
-  buildSignalDiptych();
+  signalDiptych.build();
 }
 
 function syncInfiniteBackdropMode() {
@@ -5877,205 +4727,13 @@ function updateDressUrl(assetId: DressAssetId) {
   writeDressToUrl(assetId);
 }
 
-function patchCycloramaBackgroundMaterial(material: THREE.Material) {
-  // `onBeforeCompile` is an advanced middle ground between built-in materials
-  // and writing a complete ShaderMaterial. Three.js first generates its normal
-  // MeshStandard/Basic shader; this callback injects uniforms and replaces
-  // selected `#include` chunks. We retain built-in lighting/fog/tone behavior
-  // while adding custom theme color.
-  material.onBeforeCompile = (shader) => {
-    // Uniform objects are shared, so changing their `.value` later updates every
-    // material compiled with this patch.
-    Object.assign(shader.uniforms, cycloramaBackgroundUniforms);
-    // String replacement depends on stable Three.js shader chunk names. After a
-    // major Three.js upgrade, verify these anchors still exist.
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <common>',
-      `#include <common>
-uniform float uCycloTextureMode;
-uniform vec2 uCycloTileRepeat;
-uniform vec2 uCycloCoverScale;
-uniform vec2 uCycloCoverOffset;
-uniform float uCycloTime;
 
-float cycloHash(vec2 value) {
-  return fract(sin(dot(value, vec2(127.1, 311.7))) * 43758.5453123);
-}
 
-float cycloSoftCircle(vec2 uv, vec2 center, vec2 scale, float radius, float feather) {
-  return smoothstep(radius + feather, radius - feather, length((uv - center) * scale));
-}
 
-float cycloRing(vec2 uv, vec2 center, vec2 scale, float radius, float width) {
-  float distanceToCenter = length((uv - center) * scale);
-  return smoothstep(width, 0.0, abs(distanceToCenter - radius));
-}
 
-vec3 cycloMewHoloColor(vec2 uv) {
-  vec3 electricCyan = vec3(0.25, 0.88, 1.0);
-  vec3 mintGreen = vec3(0.26, 1.0, 0.22);
-  vec3 acidLime = vec3(0.72, 1.0, 0.1);
-  vec3 holoPink = vec3(1.0, 0.16, 0.72);
-  vec3 pearlPink = vec3(1.0, 0.44, 0.86);
-  vec3 violet = vec3(0.45, 0.33, 1.0);
-  vec3 cardYellow = vec3(1.0, 0.88, 0.0);
 
-  float upperYellow = cycloSoftCircle(uv, vec2(0.77, 0.78), vec2(1.0, 1.05), 0.34, 0.24);
-  float leftPink = cycloSoftCircle(uv, vec2(0.22, 0.58), vec2(0.72, 1.08), 0.52, 0.3);
-  float centerPink = cycloSoftCircle(uv, vec2(0.57, 0.55), vec2(1.08, 0.88), 0.37, 0.25);
-  float lowerGreen = cycloSoftCircle(uv, vec2(0.34, 0.2), vec2(0.72, 1.08), 0.58, 0.3);
-  float rightLime = cycloSoftCircle(uv, vec2(0.83, 0.34), vec2(0.86, 1.2), 0.42, 0.24);
-  float cyanPocket = cycloSoftCircle(uv, vec2(0.5, 0.82), vec2(1.2, 0.9), 0.5, 0.34);
 
-  vec3 base = electricCyan;
-  base = mix(base, mintGreen, lowerGreen * 0.86);
-  base = mix(base, acidLime, rightLime * 0.72);
-  base = mix(base, pearlPink, leftPink * 0.82);
-  base = mix(base, holoPink, centerPink * 0.68);
-  base = mix(base, cardYellow, upperYellow * 0.84);
-  base = mix(base, electricCyan, cyanPocket * 0.34);
 
-  float slowShift = uCycloTime * 0.028;
-  float broadFoil = sin((uv.x * 1.75 - uv.y * 1.12 + slowShift) * 6.2831853) * 0.5 + 0.5;
-  float prismA = sin((uv.x * 8.5 + uv.y * 5.8 - uCycloTime * 0.075) * 6.2831853) * 0.5 + 0.5;
-  float prismB = sin((uv.x * -6.2 + uv.y * 9.6 + uCycloTime * 0.052) * 6.2831853) * 0.5 + 0.5;
-  vec3 rainbowFoil = mix(holoPink, mintGreen, prismA);
-  rainbowFoil = mix(rainbowFoil, violet, prismB * 0.56);
-  rainbowFoil = mix(rainbowFoil, cardYellow, pow(broadFoil, 3.0) * 0.36);
-  base = mix(base, rainbowFoil, 0.42);
-
-  float glossStripe = pow(smoothstep(0.8, 1.0, sin((uv.x * 4.2 - uv.y * 3.8 + 0.22 + uCycloTime * 0.05) * 6.2831853) * 0.5 + 0.5), 5.0);
-  float fineStripe = pow(smoothstep(0.88, 1.0, sin((uv.x * 17.0 - uv.y * 13.0 + uCycloTime * 0.18) * 6.2831853) * 0.5 + 0.5), 3.8);
-  float foilVeil = pow(broadFoil, 2.2) * 0.14 + glossStripe * 0.2 + fineStripe * 0.1;
-
-  float printDots = cycloHash(floor(uv * vec2(260.0, 210.0)));
-  float fineGrain = cycloHash(floor((uv + vec2(0.37, 0.13)) * vec2(680.0, 520.0)));
-  float grain = (printDots - 0.5) * 0.06 + (fineGrain - 0.5) * 0.032;
-
-  base = mix(base, vec3(1.0, 0.96, 0.78), foilVeil);
-  base += grain;
-  float luminance = dot(base, vec3(0.299, 0.587, 0.114));
-  base = mix(vec3(luminance), base, 1.65);
-
-  return clamp(base * 0.94, 0.0, 1.0);
-}
-
-vec3 cycloIvoryHoloColor(vec2 uv) {
-  vec3 porcelain = vec3(0.96, 0.94, 0.88);
-  vec3 warmIvory = vec3(1.0, 0.97, 0.88);
-  vec3 stone = vec3(0.78, 0.73, 0.66);
-  vec3 coolPearl = vec3(0.9, 0.92, 0.9);
-
-  float warmPool = cycloSoftCircle(uv, vec2(0.74, 0.7), vec2(1.05, 0.92), 0.46, 0.34);
-  float coolPool = cycloSoftCircle(uv, vec2(0.22, 0.4), vec2(0.9, 1.2), 0.54, 0.36);
-  float floorWarmth = smoothstep(0.0, 0.44, 1.0 - uv.y);
-
-  vec3 base = porcelain;
-  base = mix(base, warmIvory, warmPool * 0.42 + floorWarmth * 0.18);
-  base = mix(base, coolPearl, coolPool * 0.28);
-  base = mix(base, stone, smoothstep(0.0, 1.0, uv.y) * 0.1);
-
-  float broadSheen = sin((uv.x * 2.0 - uv.y * 1.35 + uCycloTime * 0.015) * 6.2831853) * 0.5 + 0.5;
-  float fineFiber = sin((uv.x * 21.0 + uv.y * 15.0) * 6.2831853) * 0.5 + 0.5;
-  float paper = cycloHash(floor(uv * vec2(190.0, 160.0))) - 0.5;
-  float softRing = cycloRing(uv, vec2(0.72, 0.46), vec2(1.2, 0.86), 0.28, 0.02);
-
-  base = mix(base, warmIvory, pow(broadSheen, 4.0) * 0.16);
-  base += vec3(paper * 0.045);
-  base += vec3(fineFiber * 0.026);
-  base += vec3(1.0, 0.98, 0.92) * softRing * 0.18;
-
-  return clamp(base, 0.48, 0.98);
-}`,
-    );
-    shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', cycloramaMapFragment);
-  };
-  material.customProgramCacheKey = () => 'cyclorama-background-v5';
-}
-
-const cycloramaMapFragment = `
-#ifdef USE_MAP
-  if (uCycloTextureMode > 3.5) {
-    vec3 holoColor = cycloIvoryHoloColor(vMapUv);
-    diffuseColor.rgb = holoColor;
-  } else if (uCycloTextureMode > 2.5) {
-    vec3 holoColor = cycloMewHoloColor(vMapUv);
-    diffuseColor.rgb = holoColor;
-  } else if (uCycloTextureMode > 0.5 && uCycloTextureMode < 1.5) {
-    vec4 sampledDiffuseColor = texture2D(map, fract(vMapUv * uCycloTileRepeat));
-    diffuseColor *= sampledDiffuseColor;
-  } else if (uCycloTextureMode >= 1.5) {
-    vec2 coveredUv = uCycloCoverOffset + vMapUv * uCycloCoverScale;
-    vec4 sampledDiffuseColor = texture2D(map, coveredUv);
-    diffuseColor *= sampledDiffuseColor;
-  }
-#endif
-`;
-
-function getCycloramaSurfaceLength() {
-  const floorLength = CYCLO_FRONT_Z - (CYCLO_BACK_Z + CYCLO_RADIUS);
-  const curveLength = CYCLO_RADIUS * Math.PI * 0.5;
-  const wallLength = CYCLO_WALL_HEIGHT - CYCLO_RADIUS;
-
-  return floorLength + curveLength + wallLength;
-}
-
-function getProfileDistances(profile: Array<{ y: number; z: number }>) {
-  let distance = 0;
-
-  return profile.map((point, index) => {
-    if (index === 0) {
-      return 0;
-    }
-
-    const previousPoint = profile[index - 1];
-    distance += Math.hypot(point.y - previousPoint.y, point.z - previousPoint.z);
-
-    return distance;
-  });
-}
-
-function setObjectOpacity(root: THREE.Object3D, opacity: number) {
-  root.traverse((object) => {
-    const mesh = object as THREE.Mesh;
-
-    if (!mesh.isMesh || !mesh.material) {
-      return;
-    }
-
-    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    materials.forEach((material) => setMaterialOpacity(material, opacity));
-  });
-}
-
-function setMaterialOpacity(material: THREE.Material, opacity: number) {
-  let original = materialFadeOriginals.get(material);
-
-  if (!original) {
-    original = {
-      opacity: material.opacity,
-      transparent: material.transparent,
-      depthWrite: material.depthWrite,
-    };
-    materialFadeOriginals.set(material, original);
-  }
-
-  if (opacity >= 0.999) {
-    // Restore exactly what the GLB supplied rather than assuming all materials
-    // began opaque/depth-writing.
-    material.opacity = original.opacity;
-    material.transparent = original.transparent;
-    material.depthWrite = original.depthWrite;
-  } else {
-    // Transparent crossfading materials must not write depth: an almost
-    // invisible outgoing mesh writing depth could punch holes in the incoming.
-    material.opacity = original.opacity * opacity;
-    material.transparent = true;
-    material.depthWrite = false;
-  }
-
-  material.needsUpdate = true;
-}
 
 function syncCinematicFinishPass() {
   syncCinematicUniforms(cinematicFinishPass);
@@ -6136,106 +4794,6 @@ function syncIvoryBackgroundOpticsPass(enabled: boolean) {
   uniforms.uStrength.value = ivoryBackgroundOpticsSettings.strength;
   uniforms.uRadiusScale.value = ivoryBackgroundOpticsSettings.radiusScale;
   uniforms.uPulseSpeed.value = ivoryBackgroundOpticsSettings.pulseSpeed;
-}
-
-function disposeGhostDressRecord(record: GhostDressRecord) {
-  if (record.root.parent) {
-    record.root.parent.remove(record.root);
-  }
-
-  disposeObjectResources(record.root, { disposeMaterials: false });
-  record.material.dispose();
-  record.fillMaterial.dispose();
-  record.wireMaterial.dispose();
-}
-
-function disposeDressThumbnailRecord(record: DressThumbnailRecord) {
-  if (record.root) {
-    const materials = new Set<THREE.Material>();
-
-    record.root.traverse((object) => {
-      const materialOwner = object as THREE.Object3D & {
-        material?: THREE.Material | THREE.Material[];
-      };
-
-      if (!materialOwner.material) {
-        return;
-      }
-
-      const objectMaterials = Array.isArray(materialOwner.material)
-        ? materialOwner.material
-        : [materialOwner.material];
-      objectMaterials.forEach((material) => materials.add(material));
-    });
-
-    materials.forEach((material) => material.dispose());
-    record.scene.remove(record.root);
-    record.root = null;
-  }
-
-  record.renderer.dispose();
-}
-
-function disposeObjectResources(root: THREE.Object3D, options: { disposeMaterials?: boolean } = {}) {
-  // JavaScript garbage collection cannot directly free WebGL allocations.
-  // `.dispose()` tells Three.js to delete GPU buffers, textures, and programs.
-  // Sets prevent disposing a shared geometry/material more than once.
-  const disposeMaterials = options.disposeMaterials ?? true;
-  const geometries = new Set<THREE.BufferGeometry>();
-  const materials = new Set<THREE.Material>();
-  const textures = new Set<THREE.Texture>();
-
-  root.traverse((object) => {
-    const mesh = object as THREE.Mesh;
-
-    if (!mesh.isMesh) {
-      return;
-    }
-
-    if (mesh.geometry) {
-      geometries.add(mesh.geometry);
-    }
-
-    if (mesh.material) {
-      const meshMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      meshMaterials.forEach((material) => {
-        materials.add(material);
-        collectMaterialTextures(material, textures);
-      });
-    }
-  });
-
-  geometries.forEach((geometry) => geometry.dispose());
-
-  if (disposeMaterials) {
-    textures.forEach((texture) => texture.dispose());
-    materials.forEach((material) => material.dispose());
-  }
-}
-
-function collectMaterialTextures(material: THREE.Material, textures: Set<THREE.Texture>) {
-  Object.values(material).forEach((value) => {
-    if (value && typeof value === 'object' && 'isTexture' in value && value.isTexture === true) {
-      textures.add(value as THREE.Texture);
-    }
-  });
-}
-
-function trackGeometry<T extends THREE.BufferGeometry>(geometry: T): T {
-  // Tracking helpers centralize ownership for scene-lifetime resources. They
-  // return the same object, so they compose neatly inside constructors.
-  disposableGeometries.push(geometry);
-  return geometry;
-}
-
-function trackMaterial<T extends THREE.Material>(material: T): T {
-  disposableMaterials.push(material);
-  return material;
-}
-
-function trackTexture<T extends THREE.Texture>(texture: T): T {
-  disposableTextures.push(texture);
-  return texture;
 }
 
 function queueCanvasResize() {
@@ -6307,8 +4865,8 @@ function resize() {
   bokehUniforms.aspect.value = camera.aspect;
 
 
-  buildIvoryPortal();
-  buildSignalDiptych();
+  renderIvoryPortal(ivoryPortalElement);
+  signalDiptych.build();
 }
 
 function updateMewTitleOverlayTexture() {
@@ -6392,333 +4950,18 @@ mewTitleOverlayContext.fillText(text, 0, 0);
 // beige background. Built at the exact viewport size so nothing is cut off. The
 // WebGL background carries the optical breathing; the SVG frame stays clean to
 // avoid displacement artifacts on the hard arch edge.
-function buildIvoryPortal() {
-  if (!ivoryPortalElement) {
-    return;
-  }
 
-  const w = Math.max(360, Math.round(window.innerWidth));
-  const h = Math.max(360, Math.round(window.innerHeight));
-  const mobilePortal = w < 560;
-
-  // Mobile keeps the side columns thin so the dome banner doesn't waste width;
-  // openL/openR run to the actual viewport edges so the arch has no side legs
-  // dropping down past the curve — black sits only in the upper corners.
-  const colW = mobilePortal ? Math.min(58, Math.max(38, w * 0.12)) : Math.min(330, Math.max(138, w * 0.16));
-  const openL = mobilePortal ? 0 : colW;
-  const openR = mobilePortal ? w : w - colW;
-  const spring = mobilePortal ? h * 0.32 : h * 0.58;
-  const archBottom = h;
-  const domeCtrl = mobilePortal ? h * 0.06 : h * 0.05;
-  const stroke = Math.max(1.6, w * 0.0015);
-
-  const opening = `M${openL} ${archBottom} L${openL} ${spring} C${openL} ${domeCtrl} ${openR} ${domeCtrl} ${openR} ${spring} L${openR} ${archBottom} Z`;
-  // Hairline lives just inside the desktop arch dome; on mobile the curve runs
-  // edge-to-edge so a hairline would either disappear in the open area or fight
-  // the title — skip it.
-  const hairL = colW * 0.84;
-  const hairR = w - colW * 0.84;
-  const hairCtrl = domeCtrl - h * 0.022;
-  const hairline = `M${hairL} ${spring} C${hairL} ${hairCtrl} ${hairR} ${hairCtrl} ${hairR} ${spring}`;
-  const hairlineFragment = mobilePortal
-    ? ''
-    : `<path d="${hairline}" fill="none" stroke="#000000" stroke-width="${stroke}" />`;
-
-  const titleSize = mobilePortal ? Math.min(24, Math.max(20, w * 0.058)) : Math.min(74, Math.max(26, w * 0.046));
-  const titleY = mobilePortal ? Math.max(54, h * 0.09) : Math.max(42, h * 0.115);
-  const titleLS = titleSize * (mobilePortal ? 0.09 : 0.12);
-  const subSize = mobilePortal ? Math.min(9, Math.max(7.2, w * 0.02)) : Math.min(18, Math.max(9.5, w * 0.0118));
-  const subY = titleY + titleSize * 0.66;
-  const subLS = subSize * (mobilePortal ? 0.22 : 0.5);
-  const subtitle = mobilePortal ? 'TAP GHOST DRESS \u00B7 DIFF\u00C9RANCE' : 'STUDIO STUDY \u2014 CLICK GHOST DRESS \u00B7 DIFF\u00C9RANCE';
-
-  const colSize = mobilePortal ? Math.min(9.5, Math.max(8.2, w * 0.023)) : Math.min(20, Math.max(11, w * 0.0132));
-  const lineH = colSize * (mobilePortal ? 1.52 : 1.72);
-  const colTop = mobilePortal ? h * 0.62 : h * 0.5;
-  const colInset = mobilePortal ? Math.max(11, colW * 0.13) : Math.max(16, colW * 0.2);
-  const leftX = colInset;
-  const rightX = w - colInset;
-
-  const leftLines = ['Italian born', 'New York house', 'Arden years', 'Coty award', 'silk metallic'];
-  const rightLines = ['Click a ghost', 'switch the scan', 'keep the arc', 'watch the cloth', 'return to front'];
-  const leftTspans = leftLines
-    .map((line, index) => `<tspan x="${leftX}"${index ? ` dy="${lineH}"` : ''}>${line}</tspan>`)
-    .join('');
-  const rightTspans = rightLines
-    .map((line, index) => `<tspan x="${rightX}"${index ? ` dy="${lineH}"` : ''}>${line}</tspan>`)
-    .join('');
-  // Side columns sit on the lower black strip on desktop. On mobile the dome
-  // banner has no lower strip — drop the columns so they don't render as dead
-  // space or float over the dress.
-  const sideColumnsFragment = mobilePortal
-    ? ''
-    : `<text x="${leftX}" y="${colTop}" text-anchor="start" font-size="${colSize}" font-weight="400" letter-spacing="1.2">${leftTspans}</text>
-            <text x="${rightX}" y="${colTop}" text-anchor="end" font-size="${colSize}" font-weight="400" letter-spacing="1.2">${rightTspans}</text>`;
-
-  ivoryPortalElement.innerHTML = `
-    <svg class="ivory-portal__svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <mask id="ivoryPortalMask" maskUnits="userSpaceOnUse" x="0" y="0" width="${w}" height="${h}">
-          <rect width="${w}" height="${h}" fill="#ffffff" />
-          <path d="${opening}" fill="#000000" />
-          ${hairlineFragment}
-          <g fill="#000000" font-family="Inter, ui-sans-serif, system-ui, sans-serif">
-            <text x="${w / 2}" y="${titleY}" text-anchor="middle" font-size="${titleSize}" font-weight="600" letter-spacing="${titleLS}">FASHION SYSTEM</text>
-            <text x="${w / 2}" y="${subY}" text-anchor="middle" font-size="${subSize}" font-weight="500" letter-spacing="${subLS}">${subtitle}</text>
-            ${sideColumnsFragment}
-          </g>
-        </mask>
-      </defs>
-      <g>
-        <rect width="${w}" height="${h}" fill="#0b0a08" mask="url(#ivoryPortalMask)" />
-      </g>
-    </svg>
-  `;
-}
 
 // Signal Black diptych — EVA-inspired visual language (red/black, mono, corner
 // brackets, crosshair) but ONLY real dress info (no fake metrics, no kanji, no
 // fictional codes). The two dress nodes ARE the switcher buttons: click an
 // inactive node to load that dress. Scoped to signal-black; remove the builder,
 // the .signal-diptych markup/CSS, and signalGraphNodeRecords to revert.
-function buildSignalDiptych() {
-  if (!signalDiptychElement || cycloramaBackgroundSettings.preset !== 'signal-black') {
-    return;
-  }
 
-  const w = Math.max(360, Math.round(window.innerWidth));
-  const h = Math.max(360, Math.round(window.innerHeight));
-  const mid = w / 2;
-  const activeId = dressAssetSettings.asset;
 
-  const mono = "'JetBrains Mono', 'Geist Mono', 'SF Mono', ui-monospace, Menlo, Consolas, monospace";
-  const red = '#ff2030';
-  const redDim = 'rgba(255, 32, 48, 0.55)';
-  const redFaint = 'rgba(255, 32, 48, 0.2)';
-  const inkDim = 'rgba(255, 230, 196, 0.55)';
-  const inkFaint = 'rgba(255, 230, 196, 0.22)';
-  const green = '#3aff5e';
-  const gridLine = 'rgba(255, 80, 20, 0.05)';
 
-  const unit = Math.min(w, h);
-  const nodeSize = Math.max(110, unit * 0.19);
-  const headerH = Math.max(34, h * 0.054);
-  const headerY = headerH / 2;
-  const headerFont = Math.max(10, Math.min(15, h * 0.0145));
-  const microFont = Math.max(8.5, Math.min(12, w * 0.0075));
-  const labelFont = Math.max(10, Math.min(14, w * 0.0095));
 
-  const px = (fx: number) => mid * fx;
-  const py = (fy: number) => h * fy;
-  const leftPad = Math.max(14, w * 0.018);
-  const rightPad = Math.max(14, w * 0.018);
 
-  const nodeA = { id: 'original' as DressAssetId, x: px(0.36), y: py(0.46), label: DRESS_ASSETS.original.label };
-  const nodeB = { id: 'patchwork' as DressAssetId, x: px(0.68), y: py(0.66), label: DRESS_ASSETS.patchwork.label };
-  const nodes = [nodeA, nodeB];
-  const activeNode = activeId === 'original' ? nodeA : nodeB;
-  const ringR = nodeSize * 0.58;
-
-  // Helpers --------------------------------------------------------------
-  const lineSeg = (x1: number, y1: number, x2: number, y2: number, stroke: string, sw = 1, dash = '') =>
-    `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${stroke}" stroke-width="${sw}"${dash ? ` stroke-dasharray="${dash}"` : ''} />`;
-  const cornerBrackets = (x: number, y: number, ww: number, hh: number, len: number, color: string, sw = 1.4) => [
-    lineSeg(x, y, x + len, y, color, sw), lineSeg(x, y, x, y + len, color, sw),
-    lineSeg(x + ww, y, x + ww - len, y, color, sw), lineSeg(x + ww, y, x + ww, y + len, color, sw),
-    lineSeg(x, y + hh, x + len, y + hh, color, sw), lineSeg(x, y + hh, x, y + hh - len, color, sw),
-    lineSeg(x + ww, y + hh, x + ww - len, y + hh, color, sw), lineSeg(x + ww, y + hh, x + ww, y + hh - len, color, sw),
-  ].join('');
-
-  // Faint grid background (left pane only, pure decoration) -------------
-  const gridCols = 18;
-  const gridRows = 14;
-  const gridFrags: string[] = [];
-  for (let i = 1; i < gridCols; i++) {
-    gridFrags.push(lineSeg((mid / gridCols) * i, headerH, (mid / gridCols) * i, h, gridLine));
-  }
-  for (let i = 1; i < gridRows; i++) {
-    const y = headerH + ((h - headerH) / gridRows) * i;
-    gridFrags.push(lineSeg(0, y, mid, y, gridLine));
-  }
-
-  // Header strip — minimal, real labels only ----------------------------
-  const swatchSize = headerFont * 0.95;
-  const swatchY = (headerH - swatchSize) / 2;
-  const headerStrip = `
-    ${lineSeg(0, headerH, w, headerH, redDim)}
-    <rect x="${leftPad}" y="${swatchY.toFixed(1)}" width="${swatchSize.toFixed(1)}" height="${swatchSize.toFixed(1)}" fill="${red}" />
-    <text x="${(leftPad + swatchSize + headerFont * 0.7).toFixed(1)}" y="${(headerY + headerFont * 0.36).toFixed(1)}" font-family="${mono}" font-size="${headerFont}" font-weight="800" letter-spacing="${(headerFont * 0.14).toFixed(2)}" fill="${red}">FASHION SYSTEM</text>
-    <text x="${(w - rightPad).toFixed(1)}" y="${(headerY + headerFont * 0.36).toFixed(1)}" text-anchor="end" font-family="${mono}" font-size="${headerFont}" font-weight="500" letter-spacing="${(headerFont * 0.22).toFixed(2)}" fill="${inkDim}">FIG. SARMI</text>
-  `;
-
-  // Dashed divider between panes
-  const divider = lineSeg(mid, headerH, mid, h, redDim, 1, '2 4');
-
-  // Pane titles ---------------------------------------------------------
-  const paneTitleY = headerH + Math.max(26, h * 0.036);
-  const leftPaneTitle = `
-    <text x="${leftPad}" y="${paneTitleY.toFixed(1)}" font-family="${mono}" font-size="${labelFont}" font-weight="800" letter-spacing="${(labelFont * 0.22).toFixed(2)}" fill="${red}">GARMENT GRAPH</text>
-    <text x="${leftPad}" y="${(paneTitleY + labelFont * 1.6).toFixed(1)}" font-family="${mono}" font-size="${microFont}" font-weight="500" letter-spacing="${(microFont * 0.3).toFixed(2)}" fill="${inkDim}">CLICK NODE TO LOAD DRESS</text>
-  `;
-  const rightPaneTitle = `
-    <text x="${(w - rightPad).toFixed(1)}" y="${paneTitleY.toFixed(1)}" text-anchor="end" font-family="${mono}" font-size="${labelFont}" font-weight="800" letter-spacing="${(labelFont * 0.22).toFixed(2)}" fill="${red}">ACTIVE DRESS</text>
-  `;
-
-  // Radar concentric rings around the graph midpoint (pure decoration) --
-  const graphCx = (nodeA.x + nodeB.x) / 2;
-  const graphCy = (nodeA.y + nodeB.y) / 2;
-  const radarRings = [0.16, 0.26, 0.36, 0.46].map((rFrac) => {
-    const r = unit * rFrac;
-    return `<circle cx="${graphCx.toFixed(1)}" cy="${graphCy.toFixed(1)}" r="${r.toFixed(1)}" fill="none" stroke="${redFaint}" stroke-width="1" />`;
-  }).join('');
-  const radarMaxR = unit * 0.46;
-  const radarCross = lineSeg(graphCx - radarMaxR, graphCy, graphCx + radarMaxR, graphCy, redFaint)
-                   + lineSeg(graphCx, graphCy - radarMaxR, graphCx, graphCy + radarMaxR, redFaint);
-
-  // Primary edge between the two dress nodes (no fake labels)
-  const primaryEdge = lineSeg(nodeA.x, nodeA.y, nodeB.x, nodeB.y, red, 1.6);
-
-  // Right pane corner brackets (frames the active dress) ---------------
-  const rightFrameX = mid + rightPad * 0.7;
-  const rightFrameY = headerH + 22;
-  const rightFrameW = mid - rightPad * 1.4;
-  const rightFrameH = h - headerH - 48;
-  const rightFrameBrackets = cornerBrackets(rightFrameX, rightFrameY, rightFrameW, rightFrameH, Math.max(18, unit * 0.024), red, 1.6);
-
-  // Right edge tick ladder (decorative; no numbers)
-  const rightTicks = Array.from({ length: 24 }, (_, i) => {
-    const ty = headerH + 22 + ((h - headerH - 44) / 23) * i;
-    const tlen = i % 5 === 0 ? 14 : 7;
-    return lineSeg(w - rightPad * 0.3, ty, w - rightPad * 0.3 - tlen, ty, redDim);
-  }).join('');
-
-  // Bottom-left archival note block ------------------------------------
-  const noteFont = microFont;
-  const noteLines = [
-    'italian-born american house.',
-    'arden designer before sarmi.',
-    'coty award, new york, 1960.',
-    'select a node to traverse.',
-  ];
-  const noteY0 = py(0.86);
-  const noteText = noteLines.map((line, i) =>
-    `<text x="${leftPad}" y="${(noteY0 + i * noteFont * 1.65).toFixed(1)}" font-family="${mono}" font-size="${noteFont}" font-weight="500" letter-spacing="0.4" fill="${inkFaint}">${line}</text>`,
-  ).join('');
-
-  // BASE SVG (below the dress canvases) ---------------------------------
-  const baseSvg = `
-    <svg class="signal-diptych__svg signal-diptych__base" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
-      ${gridFrags.join('')}
-      ${headerStrip}
-      ${divider}
-      ${leftPaneTitle}
-      ${rightPaneTitle}
-      ${radarRings}
-      ${radarCross}
-      ${primaryEdge}
-      ${noteText}
-      ${rightFrameBrackets}
-      ${rightTicks}
-    </svg>`;
-
-  // OVERLAY SVG (above the dress canvases): crosshair + ring + labels ---
-  const crosshair = (cx: number, cy: number, r: number) => {
-    const gap = r + 8;
-    const len = r + 28;
-    return lineSeg(cx - len, cy, cx - gap, cy, green, 1.6)
-         + lineSeg(cx + len, cy, cx + gap, cy, green, 1.6)
-         + lineSeg(cx, cy - len, cx, cy - gap, green, 1.6)
-         + lineSeg(cx, cy + len, cx, cy + gap, green, 1.6);
-  };
-  const activeBrackets = cornerBrackets(activeNode.x - ringR - 12, activeNode.y - ringR - 12, (ringR + 12) * 2, (ringR + 12) * 2, 14, green, 2);
-  const overlaySvg = `
-    <svg class="signal-diptych__svg signal-diptych__overlay" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
-      ${crosshair(activeNode.x, activeNode.y, ringR)}
-      <circle cx="${activeNode.x.toFixed(1)}" cy="${activeNode.y.toFixed(1)}" r="${ringR.toFixed(1)}" fill="none" stroke="${green}" stroke-width="2.4" />
-      <circle cx="${activeNode.x.toFixed(1)}" cy="${activeNode.y.toFixed(1)}" r="${(ringR + 6).toFixed(1)}" fill="none" stroke="${green}" stroke-width="1" opacity="0.32" stroke-dasharray="3 4" />
-      ${activeBrackets}
-    </svg>`;
-
-  // Preserve existing node canvases (their WebGL renderers + scenes persist
-  // across rebuilds) so rebuilding the SVG never tears down GPU state.
-  const existingCanvases = new Map<DressAssetId, HTMLCanvasElement>();
-  signalGraphNodeRecords.forEach((record, id) => existingCanvases.set(id, record.canvas));
-
-  signalDiptychElement.innerHTML = baseSvg + overlaySvg;
-
-  const canvasSize = Math.round(nodeSize * 1.6);
-  nodes.forEach((node) => {
-    let canvas = existingCanvases.get(node.id);
-    if (!canvas) {
-      canvas = document.createElement('canvas');
-      canvas.className = 'signal-diptych__node';
-      canvas.dataset.dressId = node.id;
-    }
-    const isActive = node.id === activeId;
-    canvas.dataset.active = String(isActive);
-    canvas.style.left = `${node.x - canvasSize / 2}px`;
-    canvas.style.top = `${node.y - canvasSize / 2}px`;
-    canvas.style.width = `${canvasSize}px`;
-    canvas.style.height = `${canvasSize}px`;
-    canvas.dataset.signalNodeSize = String(canvasSize);
-    canvas.setAttribute('role', 'button');
-    canvas.setAttribute('aria-label', `Switch to ${node.label}`);
-    canvas.setAttribute('aria-pressed', String(isActive));
-    canvas.tabIndex = isActive ? -1 : 0;
-    // Insert between base svg and overlay svg so the green ring sits above.
-    const overlay = signalDiptychElement.querySelector('.signal-diptych__overlay');
-    signalDiptychElement.insertBefore(canvas, overlay);
-    const record = ensureSignalGraphNodeRecord(node.id, canvas);
-    record.renderer.setSize(canvasSize, canvasSize, false);
-  });
-
-  renderSignalGraphNodes();
-}
-
-function ensureSignalGraphNodeRecord(assetId: DressAssetId, canvas: HTMLCanvasElement) {
-  const existing = signalGraphNodeRecords.get(assetId);
-  if (existing && existing.canvas === canvas) {
-    return existing;
-  }
-  if (existing) {
-    existing.renderer.dispose();
-    signalGraphNodeRecords.delete(assetId);
-  }
-
-  const renderer = new THREE.WebGLRenderer({
-    canvas,
-    alpha: true,
-    antialias: true,
-    powerPreference: 'low-power',
-  });
-  renderer.setClearColor(0x000000, 0);
-  renderer.setPixelRatio(getRenderPixelRatio());
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.NoToneMapping;
-
-  const record: SignalGraphNodeRecord = { assetId, canvas, renderer };
-  signalGraphNodeRecords.set(assetId, record);
-  return record;
-}
-
-function renderSignalGraphNodes() {
-  if (cycloramaBackgroundSettings.preset !== 'signal-black') {
-    return;
-  }
-  signalGraphNodeRecords.forEach((node) => {
-    const thumb = dressThumbnailRecords.get(node.assetId);
-    if (!thumb?.root) {
-      return;
-    }
-    const styled = Number(node.canvas.dataset.signalNodeSize || '0');
-    const size = styled || node.canvas.clientWidth || 128;
-    node.renderer.setPixelRatio(getRenderPixelRatio());
-    node.renderer.setSize(size, size, false);
-    thumb.camera.aspect = 1;
-    thumb.camera.updateProjectionMatrix();
-    node.renderer.render(thumb.scene, thumb.camera);
-  });
-}
 
 function applyResponsiveCamera(width: number, height: number) {
   // Camera responsiveness preserves composition in 3D rather than merely
@@ -6869,8 +5112,8 @@ window.addEventListener('touchcancel', handleMewHoloTouchEnd);
 window.addEventListener('resize', resize);
 window.addEventListener('beforeunload', dispose);
 
-buildIvoryPortal();
-buildSignalDiptych();
+renderIvoryPortal(ivoryPortalElement);
+signalDiptych.build();
 
 function dispose() {
   // -------------------------------------------------------------------------
@@ -6948,12 +5191,9 @@ function dispose() {
   mewTitleOverlayTexture.dispose();
   mewTitleOverlayMaterial.dispose();
   mewTitleOverlayGeometry.dispose();
-  signalGraphNodeRecords.forEach((record) => record.renderer.dispose());
-  signalGraphNodeRecords.clear();
+  signalDiptych.dispose();
   timer.dispose();
-  disposableGeometries.forEach((geometry) => geometry.dispose());
-  disposableMaterials.forEach((material) => material.dispose());
-  disposableTextures.forEach((texture) => texture.dispose());
+  resourceTracker.dispose();
   scene.environment?.dispose();
   pmrem.dispose();
   renderer.dispose();
