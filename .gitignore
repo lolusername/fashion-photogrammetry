@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local snapshots kept outside project history
+/git/
+/git.zip
+/src.zip
+/src [0-9]*.zip
