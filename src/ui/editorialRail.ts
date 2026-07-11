@@ -8,6 +8,7 @@ export type EditorialRail = {
   setTheme: (themeId: PublicThemeId) => void;
   setReady: (ready: boolean) => void;
   setCollapsed: (collapsed: boolean) => void;
+  destroy: () => void;
 };
 
 type EditorialRailOptions = {
@@ -95,9 +96,10 @@ export function createEditorialRail(options: EditorialRailOptions): EditorialRai
     );
   };
 
-  collapseToggle?.addEventListener('click', () => {
+  const handleCollapseToggle = () => {
     setCollapsed(rail.dataset.collapsed !== 'true');
-  });
+  };
+  collapseToggle?.addEventListener('click', handleCollapseToggle);
 
   setTheme(options.activeThemeId);
   setCollapsed(window.matchMedia('(max-width: 720px)').matches);
@@ -109,5 +111,9 @@ export function createEditorialRail(options: EditorialRailOptions): EditorialRai
     setTheme,
     setReady,
     setCollapsed,
+    destroy: () => {
+      collapseToggle?.removeEventListener('click', handleCollapseToggle);
+      rail.remove();
+    },
   };
 }

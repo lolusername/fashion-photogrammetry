@@ -25,3 +25,5 @@ npm run build
 ```
 
 See [THEMES.md](./THEMES.md) before editing themes or dress assets.
+See [docs/architecture.md](./docs/architecture.md) for module ownership,
+extension paths, rendering order, and mobile GPU constraints.

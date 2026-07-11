@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 
+import { usesMobileRenderProfile } from '../app/renderProfile';
+import type { CycloramaBackgroundPresetId } from '../config/themes';
+
 // ---------------------------------------------------------------------------
 // INVISIBLE CITIES "SYSTEM" TITLE MASK
 // ---------------------------------------------------------------------------
@@ -39,7 +42,7 @@ export function createMewTitleOverlay() {
     },
     vertexShader: `
       varying vec2 vUv;
-  
+
       void main() {
         vUv = uv;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
@@ -52,13 +55,13 @@ export function createMewTitleOverlay() {
       uniform float uBackgroundNeedsOutput;
       uniform float uToneMappingExposure;
       varying vec2 vUv;
-  
+
       vec3 rrtAndOdtFit(vec3 value) {
         vec3 a = value * (value + 0.0245786) - 0.000090537;
         vec3 b = value * (0.983729 * value + 0.4329510) + 0.238081;
         return a / b;
       }
-  
+
       vec3 acesFilmicToneMapping(vec3 color) {
         const mat3 inputMatrix = mat3(
           vec3(0.59719, 0.07600, 0.02840),
@@ -75,7 +78,7 @@ export function createMewTitleOverlay() {
         color = rrtAndOdtFit(color);
         return clamp(outputMatrix * color, 0.0, 1.0);
       }
-  
+
       vec3 linearToSrgb(vec3 color) {
         return mix(
           pow(color, vec3(0.41666)) * 1.055 - vec3(0.055),
@@ -83,7 +86,7 @@ export function createMewTitleOverlay() {
           vec3(lessThanEqual(color, vec3(0.0031308)))
         );
       }
-  
+
       float piecewiseRamp(float value, float a, float b, float c, float d, float e, float f, float g, float h) {
         if (value < a) return mix(0.0, b, value / a);
         if (value < c) return mix(b, d, (value - a) / (c - a));
@@ -93,7 +96,7 @@ export function createMewTitleOverlay() {
         if (value < 0.95) return mix(h, 0.1, (value - g) / (0.95 - g));
         return mix(0.1, 0.0, (value - 0.95) / 0.05);
       }
-  
+
       float mainCanvasMask(vec2 uv) {
         // Mirrors the main Mew canvas's two CSS mask gradients. The visible
         // canvas is alpha-composited over white after this mask is applied.
@@ -101,7 +104,7 @@ export function createMewTitleOverlay() {
         float vertical = piecewiseRamp(uv.y, 0.04, 0.12, 0.09, 0.55, 0.15, 0.75, 0.87, 0.5);
         return horizontal * vertical;
       }
-  
+
       void main() {
         // Mask RGB is irrelevant; its alpha defines the letter silhouettes.
         vec4 mask = texture2D(uMask, vUv);
@@ -123,17 +126,17 @@ export function createMewTitleOverlay() {
         // uBlackOpacity is an interpolation amount, not material opacity:
         // 0 = exact background color in the stencil
         // 1 = black title color in the stencil
-  
+
       vec3 titleColor = mix(backgroundColor, vec3(0.043), uBlackOpacity);
-  
+
       // mask.a = full silhouette: border + letters
       // mask.r = inner letters only, because canvas fill is white
       float fullShape = mask.a;
       float innerLetters = mask.r;
-  
+
       // Border gets black. Letter interior keeps the existing title behavior.
       vec3 finalColor = mix(vec3(0.0), titleColor, innerLetters);
-  
+
       gl_FragColor = vec4(finalColor, fullShape);
       }
     `,
@@ -153,4 +156,148 @@ export function createMewTitleOverlay() {
     mewTitleOverlayGeometry,
     mewTitleOverlayMaterial,
   };
+}
+
+export type MewTitleOverlayControllerOptions = {
+  canvasElement: HTMLCanvasElement;
+  titleWordElement: HTMLSpanElement | null;
+  getThemeId: () => CycloramaBackgroundPresetId;
+};
+
+export class MewTitleOverlayController {
+  readonly overlay = createMewTitleOverlay();
+  private readonly canvasElement: HTMLCanvasElement;
+  private readonly titleWordElement: HTMLSpanElement | null;
+  private readonly getThemeId: () => CycloramaBackgroundPresetId;
+  private readonly layoutObserver: ResizeObserver;
+  private queuedFrame = 0;
+  private dirty = true;
+  private disposed = false;
+
+  constructor(options: MewTitleOverlayControllerOptions) {
+    this.canvasElement = options.canvasElement;
+    this.titleWordElement = options.titleWordElement;
+    this.getThemeId = options.getThemeId;
+    this.layoutObserver = new ResizeObserver(() => this.queueUpdate());
+  }
+
+  get isDirty() {
+    return this.dirty;
+  }
+
+  setDirty(dirty: boolean) {
+    this.dirty = dirty;
+  }
+
+  markDirty() {
+    this.dirty = true;
+  }
+
+  observe() {
+    if (this.titleWordElement) {
+      this.layoutObserver.observe(this.titleWordElement);
+    }
+  }
+
+  queueUpdate() {
+    this.dirty = true;
+    if (this.queuedFrame) {
+      window.cancelAnimationFrame(this.queuedFrame);
+    }
+    this.queuedFrame = window.requestAnimationFrame(() => {
+      this.queuedFrame = 0;
+      if (!this.disposed) {
+        this.dirty = !this.update();
+      }
+    });
+  }
+
+  update() {
+    if (!this.titleWordElement) {
+      return false;
+    }
+
+    const canvasBounds = this.canvasElement.getBoundingClientRect();
+    const width = this.overlay.mewTitleOverlayCanvas.width;
+    const height = this.overlay.mewTitleOverlayCanvas.height;
+    if (canvasBounds.width <= 0 || canvasBounds.height <= 0) {
+      return false;
+    }
+
+    if (this.getThemeId() !== 'mew-holo') {
+      this.overlay.mewTitleOverlayContext.clearRect(0, 0, width, height);
+      this.overlay.mewTitleOverlayTexture.needsUpdate = true;
+      return false;
+    }
+
+    const range = document.createRange();
+    range.selectNodeContents(this.titleWordElement);
+    const wordBounds = range.getBoundingClientRect();
+    range.detach();
+
+    if (wordBounds.width <= 0 || wordBounds.height <= 0) {
+      this.overlay.mewTitleOverlayContext.clearRect(0, 0, width, height);
+      this.overlay.mewTitleOverlayTexture.needsUpdate = true;
+      return false;
+    }
+
+    const style = window.getComputedStyle(this.titleWordElement);
+    const scaleX = width / canvasBounds.width;
+    const scaleY = height / canvasBounds.height;
+    const fontSize = Number.parseFloat(style.fontSize) * scaleY;
+    const letterSpacing = Number.parseFloat(style.letterSpacing) * scaleX;
+    const text = this.titleWordElement.textContent?.trim() || 'System';
+
+    const x = (wordBounds.left - canvasBounds.left) * scaleX;
+    const top = (wordBounds.top - canvasBounds.top) * scaleY;
+
+    this.overlay.mewTitleOverlayContext.clearRect(0, 0, width, height);
+    this.overlay.mewTitleOverlayContext.font = `${style.fontWeight} ${fontSize}px ${style.fontFamily}`;
+    this.overlay.mewTitleOverlayContext.textBaseline = 'alphabetic';
+    (this.overlay.mewTitleOverlayContext as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing =
+      `${letterSpacing}px`;
+
+    const metrics = this.overlay.mewTitleOverlayContext.measureText(text);
+    const measuredWidth = Math.max(1, metrics.width);
+    const targetWidth = Math.max(1, wordBounds.width * scaleX);
+    const inkHeight = metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent;
+    const targetHeight = Math.max(1, wordBounds.height * scaleY);
+    const baseline = top + Math.max(0, (targetHeight - inkHeight) * 0.5) + metrics.actualBoundingBoxAscent;
+    this.overlay.mewTitleOverlayContext.save();
+    this.overlay.mewTitleOverlayContext.translate(x, baseline);
+    this.overlay.mewTitleOverlayContext.scale(targetWidth / measuredWidth, 1);
+    this.overlay.mewTitleOverlayContext.globalAlpha = 1;
+
+    if (true) {
+      // Desktop keeps the authored outline treatment. On mobile the same outline
+      // consumes too much of the reduced glyph area, so its alpha mask is a
+      // single solid silhouette instead.
+      this.overlay.mewTitleOverlayContext.lineJoin = 'round';
+      this.overlay.mewTitleOverlayContext.miterLimit = 2;
+      this.overlay.mewTitleOverlayContext.lineWidth =
+      fontSize * (usesMobileRenderProfile() ? 0.04 : 0.01);
+      this.overlay.mewTitleOverlayContext.strokeStyle = '#000000';
+      this.overlay.mewTitleOverlayContext.strokeText(text, 0, 0);
+    }
+
+  // White fill = inner-letter marker.
+  // This is NOT the visible color. The shader still decides visible fill color.
+  this.overlay.mewTitleOverlayContext.fillStyle = '#0000';
+  this.overlay.mewTitleOverlayContext.fillText(text, 0, 0);
+    this.overlay.mewTitleOverlayContext.restore();
+    this.overlay.mewTitleOverlayTexture.needsUpdate = true;
+    return true;
+  }
+
+  dispose() {
+    this.disposed = true;
+    if (this.queuedFrame) {
+      window.cancelAnimationFrame(this.queuedFrame);
+      this.queuedFrame = 0;
+    }
+    this.layoutObserver.disconnect();
+    this.overlay.mewTitleOverlayTexture.dispose();
+    this.overlay.mewTitleOverlayMaterial.dispose();
+    this.overlay.mewTitleOverlayGeometry.dispose();
+  }
 }

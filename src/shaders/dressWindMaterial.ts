@@ -1,44 +1,10 @@
 import * as THREE from 'three';
 
 /**
- * DRESS WIND: PATCHING A BUILT-IN MATERIAL'S VERTEX SHADER
- * ========================================================
- *
- * The goal is to move fabric vertices while preserving the GLB's original
- * textures and Three.js's physically based lighting. Replacing the material
- * with a raw ShaderMaterial would require reimplementing skinning, texture maps,
- * lights, fog, tone mapping, and many material features.
- *
- * Instead, `onBeforeCompile` modifies Three.js's generated vertex shader:
- *
- *   built-in transformed vertex
- *               +
- *   getDressWindOffset(position, normal)
- *               =
- *   final displaced vertex
- *
- * This is vertex displacement, not a 2D post effect. The silhouette and surface
- * genuinely move before projection. Pixel count does not change the simulation;
- * mesh vertex density does. A very low-poly dress cannot form detailed folds
- * because the shader has too few vertices to move.
- *
- * CPU/GPU responsibility split:
- *
- * CPU (TypeScript)
- * - listens to pointer input elsewhere,
- * - computes smoothed wind/activity values,
- * - uploads them as uniforms,
- * - installs/restores patched materials.
- *
- * GPU (GLSL)
- * - runs the displacement function independently for every vertex,
- * - derives masks from each vertex's local position,
- * - combines broad and fine sine waves,
- * - returns a local-space offset.
- *
- * The same deformation is installed into a MeshDepthMaterial. If shadow maps
- * are enabled later, the depth/shadow silhouette must use the displaced
- * vertices too; otherwise the rendered cloth and its shadow disagree.
+ * Adds vertex wind through `onBeforeCompile` so each GLB keeps its original PBR
+ * textures and lighting support. CPU code supplies smoothed uniform values; the
+ * GPU derives spatial masks and displaces each vertex. A matching depth material
+ * keeps any future shadow/depth pass aligned with the visible silhouette.
  */
 
 export type DressWindSettings = {
@@ -112,7 +78,6 @@ export function syncDressMaterialGrain(input: DressMaterialGrainUpdate) {
   );
   dressMaterialGrainUniforms.uDressFilmGrain.value = input.filmGrain;
 }
-
 
 type GeometryBounds = {
   // Local-space bounds normalize arbitrary mesh coordinates to stable 0..1

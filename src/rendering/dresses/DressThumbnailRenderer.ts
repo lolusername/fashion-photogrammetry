@@ -13,6 +13,7 @@ export class DressThumbnailRenderer {
   private readonly canvases: HTMLCanvasElement[];
   private readonly getPixelRatio: () => number;
   private renderer: THREE.WebGLRenderer | null = null;
+  private initialized = false;
 
   constructor(canvases: HTMLCanvasElement[], getPixelRatio: () => number) {
     this.canvases = canvases;
@@ -20,19 +21,10 @@ export class DressThumbnailRenderer {
   }
 
   initialize() {
-    if (this.renderer) {
+    if (this.initialized) {
       return;
     }
-
-    this.renderer = new THREE.WebGLRenderer({
-      canvas: document.createElement('canvas'),
-      alpha: true,
-      antialias: true,
-      powerPreference: 'high-performance',
-    });
-    this.renderer.setClearColor(0x000000, 0);
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.NoToneMapping;
+    this.initialized = true;
 
     this.canvases.forEach((canvas) => {
       const assetId = canvas.dataset.dressThumbnail;
@@ -59,7 +51,6 @@ export class DressThumbnailRenderer {
   syncFromGhost(record: GhostDressRecord) {
     const thumbnail = this.records.get(record.asset.id);
     if (!thumbnail || thumbnail.root) {
-      this.render(record.asset.id);
       return;
     }
 
@@ -67,7 +58,6 @@ export class DressThumbnailRenderer {
     thumbnail.root = clone;
     thumbnail.scene.add(clone);
     this.frameRoot(clone);
-    this.render(record.asset.id);
   }
 
   renderAll(assetIds: readonly DressAssetId[]) {
@@ -76,10 +66,10 @@ export class DressThumbnailRenderer {
 
   render(assetId: DressAssetId) {
     const thumbnail = this.records.get(assetId);
-    const renderer = this.renderer;
-    if (!thumbnail?.root || !renderer) {
+    if (!thumbnail?.root) {
       return;
     }
+    const renderer = this.ensureRenderer();
 
     const width = Math.max(1, thumbnail.canvas.clientWidth || 148);
     const height = Math.max(1, thumbnail.canvas.clientHeight || 148);
@@ -126,6 +116,24 @@ export class DressThumbnailRenderer {
     this.records.clear();
     this.renderer?.dispose();
     this.renderer = null;
+    this.initialized = false;
+  }
+
+  private ensureRenderer() {
+    if (this.renderer) {
+      return this.renderer;
+    }
+
+    this.renderer = new THREE.WebGLRenderer({
+      canvas: document.createElement('canvas'),
+      alpha: true,
+      antialias: true,
+      powerPreference: 'high-performance',
+    });
+    this.renderer.setClearColor(0x000000, 0);
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.NoToneMapping;
+    return this.renderer;
   }
 
   private createGhostClone(root: THREE.Group) {
