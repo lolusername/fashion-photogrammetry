@@ -62,6 +62,7 @@ export function createEditorialRail(options: EditorialRailOptions): EditorialRai
 
   const themeButtons = Array.from(rail.querySelectorAll<HTMLButtonElement>('[data-background-preset]'));
   const collapseToggle = rail.querySelector<HTMLButtonElement>('.editorial-rail__toggle');
+  const mobileRailQuery = window.matchMedia('(max-width: 720px)');
 
   const setTheme = (themeId: PublicThemeId) => {
     const theme = themes.find((candidate) => candidate.id === themeId);
@@ -99,10 +100,14 @@ export function createEditorialRail(options: EditorialRailOptions): EditorialRai
   const handleCollapseToggle = () => {
     setCollapsed(rail.dataset.collapsed !== 'true');
   };
+  const handleViewportChange = (event: MediaQueryListEvent) => {
+    setCollapsed(event.matches);
+  };
   collapseToggle?.addEventListener('click', handleCollapseToggle);
+  mobileRailQuery.addEventListener('change', handleViewportChange);
 
   setTheme(options.activeThemeId);
-  setCollapsed(window.matchMedia('(max-width: 720px)').matches);
+  setCollapsed(mobileRailQuery.matches);
   setReady(false);
 
   return {
@@ -113,6 +118,7 @@ export function createEditorialRail(options: EditorialRailOptions): EditorialRai
     setCollapsed,
     destroy: () => {
       collapseToggle?.removeEventListener('click', handleCollapseToggle);
+      mobileRailQuery.removeEventListener('change', handleViewportChange);
       rail.remove();
     },
   };
